@@ -5,7 +5,6 @@ import type React from "react"
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { createClient } from "@/lib/supabase/client"
 import { generateInviteToken } from "@/lib/utils/format"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -23,17 +22,13 @@ export default function CreateTablePage() {
 
   // Prefill display name from saved profile / auth metadata
   useEffect(() => {
-    const supabase = createClient()
-
     const loadDefaultName = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (!user) return
-
-      const { data: dbUser } = await supabase.from("users").select("nickname").eq("firebase_uid", user.id).single()
-      const fallback = user.user_metadata?.nickname || user.user_metadata?.name || user.email?.split("@")[0] || ""
-      const suggested = dbUser?.nickname || fallback
+      const res = await fetch("/api/users/profile")
+      if (!res.ok) return
+      const json = (await res.json()) as { nickname?: string | null; email?: string | null; userMetadata?: any }
+      const fallback =
+        json.userMetadata?.nickname || json.userMetadata?.name || (json.email ? json.email.split("@")[0] : "") || ""
+      const suggested = json.nickname || fallback
       setDisplayName((prev) => prev || suggested || "")
     }
 
@@ -48,58 +43,28 @@ export default function CreateTablePage() {
     }
 
     setIsLoading(true)
-    const supabase = createClient()
 
     try {
-      // Get current user
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (!user) {
+      const res = await fetch("/api/tables", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tableName, eventDate, displayName }),
+      })
+
+      if (res.status === 401) {
         router.push("/auth/login?redirect=/group/create")
         return
       }
 
-      // Get user's DB record
-      const { data: dbUser, error: userError } = await supabase
-        .from("users")
-        .select("id")
-        .eq("firebase_uid", user.id)
-        .single()
-
-      if (userError || !dbUser) {
-        throw new Error("ユーザー情報の取得に失敗しました")
+      if (!res.ok) {
+        throw new Error("Failed to create table")
       }
 
-      // Generate invite token
-      const inviteToken = generateInviteToken()
-
-      // Create table
-      const { data: newTable, error: tableError } = await supabase
-        .from("tables")
-        .insert({
-          owner_user_id: dbUser.id,
-          name: tableName.trim(),
-          event_date: eventDate,
-          invite_token: inviteToken,
-        })
-        .select()
-        .single()
-
-      if (tableError) throw tableError
-
-      // Add creator as master member
-      const { error: memberError } = await supabase.from("table_members").insert({
-        table_id: newTable.id,
-        user_id: dbUser.id,
-        display_name: displayName.trim(),
-        is_master: true,
-      })
-
-      if (memberError) throw memberError
+      const { inviteToken } = (await res.json()) as { inviteToken: string }
+      const fallbackToken = inviteToken || generateInviteToken()
 
       toast.success("テーブルを作成しました")
-      router.push(`/group/table/${inviteToken}`)
+      router.push(`/group/table/${fallbackToken}`)
     } catch (error) {
       console.error("Error creating table:", error)
       toast.error("テーブルの作成に失敗しました")

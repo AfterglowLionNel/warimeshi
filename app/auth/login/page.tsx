@@ -2,7 +2,6 @@
 
 import type React from "react"
 
-import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -32,22 +31,26 @@ function LoginForm() {
     setIsGoogleLoading(true)
 
     try {
-      const supabase = createClient()
       const callbackUrl = `${siteUrl}/auth/callback?next=${encodeURIComponent(redirectTo)}`
-
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: callbackUrl,
-        },
+      const res = await fetch("/api/auth/oauth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: "google", redirectTo: callbackUrl }),
       })
 
-      if (error) {
-        console.error("[v0] Google OAuth error:", error)
+      if (!res.ok) {
+        console.error("[v0] Google OAuth error:", await res.text())
         setError("Googleログインに失敗しました")
         setIsGoogleLoading(false)
+        return
+      }
+
+      const { url } = (await res.json()) as { url?: string }
+      if (url) {
+        window.location.href = url
       } else {
-        // signInWithOAuth will automatically redirect to Google
+        setError("Googleログインに失敗しました")
+        setIsGoogleLoading(false)
       }
     } catch (e) {
       console.error("[v0] Unexpected error during Google login:", e)
@@ -58,19 +61,26 @@ function LoginForm() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
-    const supabase = createClient()
     setIsLoading(true)
     setError(null)
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
       })
-      if (error) throw error
+
+      if (!res.ok) {
+        const json = (await res.json().catch(() => null)) as { error?: string } | null
+        setError(json?.error || "ログインに失敗しました")
+        return
+      }
+
       router.push(redirectTo)
-    } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "ログインに失敗しました")
+    } catch (error) {
+      console.error("[v0] login error:", error)
+      setError("ログインに失敗しました")
     } finally {
       setIsLoading(false)
     }

@@ -3,6 +3,7 @@ import Link from "next/link"
 import { createClient } from "@/lib/supabase/server"
 import { TaxiCalculator } from "@/components/taxi/taxi-calculator"
 import { ArrowLeft, Calendar, Users } from "lucide-react"
+import { ArchivedTableNotice } from "@/components/group/archived-table-notice"
 
 export default async function TableTaxiPage({
   params,
@@ -39,6 +40,25 @@ export default async function TableTaxiPage({
     redirect("/auth/error?error=user_not_found")
   }
 
+  // Archived tables are only accessible by the owner
+  if (table.is_archived && table.owner_user_id !== dbUser.id) {
+    const { data: ownerMember } = await supabase
+      .from("table_members")
+      .select("display_name")
+      .eq("table_id", table.id)
+      .eq("is_master", true)
+      .limit(1)
+      .single()
+
+    return (
+      <ArchivedTableNotice
+        tableName={table.name}
+        eventDate={table.event_date}
+        ownerName={ownerMember?.display_name || "作成者"}
+      />
+    )
+  }
+
   // Check if user is a member
   const { data: membership } = await supabase
     .from("table_members")
@@ -51,10 +71,10 @@ export default async function TableTaxiPage({
     redirect(`/group/join/${token}`)
   }
 
-  // Get member count
-  const { count: memberCount } = await supabase
+  // Get member count (fetch ids to avoid empty count results)
+  const { data: members } = await supabase
     .from("table_members")
-    .select("*", { count: "exact", head: true })
+    .select("id")
     .eq("table_id", table.id)
 
   return (
@@ -77,7 +97,7 @@ export default async function TableTaxiPage({
             </span>
             <span className="flex items-center gap-1">
               <Users className="h-3 w-3" />
-              {memberCount}人
+              {(members?.length || 0)}人
             </span>
           </div>
           <p className="text-sm text-muted-foreground mt-2">タクシー・代行計算</p>

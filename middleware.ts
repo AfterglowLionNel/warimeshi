@@ -3,8 +3,32 @@ import { updateSession } from "@/lib/supabase/middleware"
 
 const PROTECTED_PREFIXES = ["/group", "/solo", "/settings"]
 
+function buildCsp(nonce: string) {
+  const csp = `
+    default-src 'self';
+    script-src 'self' 'unsafe-inline';
+    style-src 'self' 'unsafe-inline';
+    img-src 'self' data: blob: https:;
+    font-src 'self' data: https:;
+    connect-src 'self' https://*.supabase.co wss://*.supabase.co https://vitals.vercel-insights.com;
+    media-src 'self' https:;
+    object-src 'none';
+    base-uri 'self';
+    frame-ancestors 'none';
+    form-action 'self';
+    upgrade-insecure-requests;
+  `
+    .replace(/\s{2,}/g, " ")
+    .trim()
+
+  return csp
+}
+
 export async function middleware(request: NextRequest) {
+  const csp = buildCsp("")
   const res = await updateSession(request)
+
+  res.headers.set("Content-Security-Policy", csp)
 
   const supabaseProjectRef = process.env.NEXT_PUBLIC_SUPABASE_URL
     ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname.split(".")[0]
@@ -31,7 +55,6 @@ export async function middleware(request: NextRequest) {
     alreadyRedirecting,
   })
 
-  // Keep this lightweight: block obvious unauthenticated access by checking auth cookies
   const hasAuthCookie = hasSupabaseSessionCookie
 
   if (alreadyRedirecting) {
@@ -43,12 +66,18 @@ export async function middleware(request: NextRequest) {
     const url = new URL(base)
     url.pathname = "/auth/login"
     url.searchParams.set("redirect", pathname)
-    return NextResponse.redirect(url.toString())
+
+    const redirectRes = NextResponse.redirect(url.toString())
+    redirectRes.headers.set("Content-Security-Policy", csp)
+    return redirectRes
   }
 
-  return res
+  return NextResponse.next({
+    request: { headers: request.headers },
+    headers: res.headers,
+  })
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
 }

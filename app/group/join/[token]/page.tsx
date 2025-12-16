@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation"
 import { createClient } from "@/lib/supabase/server"
 import { JoinTableForm } from "@/components/group/join-table-form"
+import { ArchivedTableNotice } from "@/components/group/archived-table-notice"
 
 export default async function JoinTablePage({
   params,
@@ -30,6 +31,7 @@ export default async function JoinTablePage({
     redirect(`/auth/login?redirect=/group/join/${token}`)
   }
 
+  // Resolve DB user
   // Get or create user record
   let { data: dbUser } = await supabase.from("users").select("*").eq("firebase_uid", user.id).single()
 
@@ -53,6 +55,25 @@ export default async function JoinTablePage({
     redirect("/auth/error?error=user_creation_failed")
   }
 
+  // Archived tables are only accessible by the owner
+  if (table.is_archived && table.owner_user_id !== dbUser.id) {
+    const { data: ownerMember } = await supabase
+      .from("table_members")
+      .select("display_name")
+      .eq("table_id", table.id)
+      .eq("is_master", true)
+      .limit(1)
+      .single()
+
+    return (
+      <ArchivedTableNotice
+        tableName={table.name}
+        eventDate={table.event_date}
+        ownerName={ownerMember?.display_name || "作成者"}
+      />
+    )
+  }
+
   // Check if already a member
   const { data: existingMember } = await supabase
     .from("table_members")
@@ -65,17 +86,16 @@ export default async function JoinTablePage({
     redirect(`/group/table/${token}`)
   }
 
-  // Get current member count
-  const { count: memberCount } = await supabase
+  // Get current member count (explicitly fetch ids to avoid stale/empty counts)
+  const { data: members } = await supabase
     .from("table_members")
-    .select("*", { count: "exact", head: true })
+    .select("id")
     .eq("table_id", table.id)
 
   return (
     <JoinTableForm
       table={table}
-      user={dbUser}
-      memberCount={memberCount || 0}
+      memberCount={members?.length || 0}
       defaultDisplayName={dbUser.nickname || ""}
     />
   )

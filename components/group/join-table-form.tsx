@@ -5,8 +5,7 @@ import type React from "react"
 import { useState, useEffect } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { createClient } from "@/lib/supabase/client"
-import type { Table, User } from "@/lib/types/group"
+import type { Table } from "@/lib/types/group"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -16,12 +15,11 @@ import { toast } from "sonner"
 
 interface JoinTableFormProps {
   table: Table
-  user: User
   memberCount: number
   defaultDisplayName: string
 }
 
-export function JoinTableForm({ table, user, memberCount, defaultDisplayName }: JoinTableFormProps) {
+export function JoinTableForm({ table, memberCount, defaultDisplayName }: JoinTableFormProps) {
   const [displayName, setDisplayName] = useState(defaultDisplayName)
   const [isLoading, setIsLoading] = useState(false)
   const router = useRouter()
@@ -48,17 +46,16 @@ export function JoinTableForm({ table, user, memberCount, defaultDisplayName }: 
     }
 
     setIsLoading(true)
-    const supabase = createClient()
-
     try {
-      const { error } = await supabase.from("table_members").insert({
-        table_id: table.id,
-        user_id: user.id,
-        display_name: displayName.trim(),
-        is_master: false,
+      const res = await fetch("/api/table-members", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tableId: table.id, displayName }),
       })
 
-      if (error) throw error
+      if (!res.ok) {
+        throw new Error("Failed to join table")
+      }
 
       // Clear draft
       sessionStorage.removeItem(`join-draft-${table.invite_token}`)

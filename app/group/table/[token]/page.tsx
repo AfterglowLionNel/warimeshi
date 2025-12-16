@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation"
 import { createClient } from "@/lib/supabase/server"
 import { TableDetailClient } from "@/components/group/table-detail-client"
+import { ArchivedTableNotice } from "@/components/group/archived-table-notice"
 
 export default async function TableDetailPage({
   params,
@@ -35,6 +36,25 @@ export default async function TableDetailPage({
 
   if (!dbUser) {
     redirect("/auth/error?error=user_not_found")
+  }
+
+  // Archived tables are only accessible by the owner
+  if (table.is_archived && table.owner_user_id !== dbUser.id) {
+    const { data: ownerMember } = await supabase
+      .from("table_members")
+      .select("display_name")
+      .eq("table_id", table.id)
+      .eq("is_master", true)
+      .limit(1)
+      .single()
+
+    return (
+      <ArchivedTableNotice
+        tableName={table.name}
+        eventDate={table.event_date}
+        ownerName={ownerMember?.display_name || "作成者"}
+      />
+    )
   }
 
   // Check if user is a member

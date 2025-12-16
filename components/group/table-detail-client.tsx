@@ -4,7 +4,6 @@ import type React from "react"
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { createClient } from "@/lib/supabase/client"
 import type { Order, Table, TableMember, User } from "@/lib/types/group"
 import { formatCurrency } from "@/lib/utils/format"
 import {
@@ -66,7 +65,6 @@ export function TableDetailClient({
   initialMembers,
   initialOrders,
 }: TableDetailClientProps) {
-  const supabase = createClient()
   const isTableOwner = table.owner_user_id === currentUser.id
 
   const [members, setMembers] = useState(initialMembers)
@@ -103,27 +101,29 @@ export function TableDetailClient({
 
   useEffect(() => {
     const fetchUpdates = async () => {
-      const [membersRes, ordersRes] = await Promise.all([
-        supabase
-          .from("table_members")
-          .select("*, user:users(*)")
-          .eq("table_id", table.id)
-          .order("joined_at", { ascending: true }),
-        supabase
-          .from("orders")
-          .select("*, member:table_members(*)")
-          .eq("table_id", table.id)
-          .is("deleted_at", null)
-          .order("created_at", { ascending: false }),
-      ])
+      try {
+        const [membersRes, ordersRes] = await Promise.all([
+          fetch(`/api/table-members?tableId=${table.id}`),
+          fetch(`/api/orders?tableId=${table.id}`),
+        ])
 
-      if (membersRes.data) setMembers(membersRes.data)
-      if (ordersRes.data) setOrders(ordersRes.data)
+        if (membersRes.ok) {
+          const json = (await membersRes.json()) as { data?: (TableMember & { user?: User })[] }
+          if (json.data) setMembers(json.data)
+        }
+        if (ordersRes.ok) {
+          const json = (await ordersRes.json()) as { data?: (Order & { member?: TableMember })[] }
+          if (json.data) setOrders(json.data)
+        }
+      } catch (err) {
+        console.error("Failed to poll updates", err)
+      }
     }
 
+    void fetchUpdates()
     const interval = setInterval(fetchUpdates, POLL_INTERVAL)
     return () => clearInterval(interval)
-  }, [table.id, supabase])
+  }, [table.id])
 
   const handleCopyLink = async () => {
     const link = `${window.location.origin}/group/join/${table.invite_token}`
@@ -168,30 +168,35 @@ export function TableDetailClient({
     setIsSubmitting(true)
 
     try {
-      if (selectedMember === "__all__") {
-        const inserts = members.map((m) => ({
-          table_id: table.id,
-          created_by_user_id: currentUser.id,
-          member_id: m.id,
-          item_name: itemName.trim() || null,
-          unit_price: price,
-          quantity: qty,
-          line_total: price * qty,
-        }))
+      const inserts =
+        selectedMember === "__all__"
+          ? members.map((m) => ({
+              table_id: table.id,
+              member_id: m.id,
+              item_name: itemName.trim() || null,
+              unit_price: price,
+              quantity: qty,
+              line_total: price * qty,
+            }))
+          : [
+              {
+                table_id: table.id,
+                member_id: selectedMember,
+                item_name: itemName.trim() || null,
+                unit_price: price,
+                quantity: qty,
+                line_total: price * qty,
+              },
+            ]
 
-        const { error } = await supabase.from("orders").insert(inserts)
-        if (error) throw error
-      } else {
-        const { error } = await supabase.from("orders").insert({
-          table_id: table.id,
-          created_by_user_id: currentUser.id,
-          member_id: selectedMember,
-          item_name: itemName.trim() || null,
-          unit_price: price,
-          quantity: qty,
-          line_total: price * qty,
-        })
-        if (error) throw error
+      const res = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orders: inserts }),
+      })
+
+      if (!res.ok) {
+        throw new Error("Failed to add order")
       }
 
       setItemName("")
@@ -199,13 +204,11 @@ export function TableDetailClient({
       setQuantity("1")
       toast.success("注文を追加しました")
 
-      const { data } = await supabase
-        .from("orders")
-        .select("*, member:table_members(*)")
-        .eq("table_id", table.id)
-        .is("deleted_at", null)
-        .order("created_at", { ascending: false })
-      if (data) setOrders(data)
+      const refreshed = await fetch(`/api/orders?tableId=${table.id}`)
+      if (refreshed.ok) {
+        const json = (await refreshed.json()) as { data?: (Order & { member?: TableMember })[] }
+        if (json.data) setOrders(json.data)
+      }
     } catch (error) {
       console.error("Error adding order:", error)
       toast.error("注文の追加に失敗しました")
@@ -241,40 +244,47 @@ export function TableDetailClient({
     }
 
     try {
-      const { error } = await supabase
-        .from("orders")
-        .update({
-          member_id: editForm.member_id,
-          item_name: editForm.item_name.trim() || null,
-          unit_price: price,
-          quantity: qty,
-          line_total: price * qty,
-        })
-        .eq("id", orderId)
+      const res = await fetch(`/api/orders/${orderId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          updates: {
+            member_id: editForm.member_id,
+            item_name: editForm.item_name.trim() || null,
+            unit_price: price,
+            quantity: qty,
+            line_total: price * qty,
+          },
+        }),
+      })
 
-      if (error) throw error
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null
+        throw new Error(body?.error || "Failed to update order")
+      }
 
       toast.success("注文を更新しました")
       cancelEdit()
 
-      const { data } = await supabase
-        .from("orders")
-        .select("*, member:table_members(*)")
-        .eq("table_id", table.id)
-        .is("deleted_at", null)
-        .order("created_at", { ascending: false })
-      if (data) setOrders(data)
+      const refreshed = await fetch(`/api/orders?tableId=${table.id}`)
+      if (refreshed.ok) {
+        const json = (await refreshed.json()) as { data?: (Order & { member?: TableMember })[] }
+        if (json.data) setOrders(json.data)
+      }
     } catch (error) {
       console.error("Error updating order:", error)
-      toast.error("更新に失敗しました")
+      const message = error instanceof Error ? error.message : "更新に失敗しました"
+      toast.error(message)
     }
   }
 
   const deleteOrder = async (orderId: string) => {
     try {
-      const { error } = await supabase.from("orders").update({ deleted_at: new Date().toISOString() }).eq("id", orderId)
+      const res = await fetch(`/api/orders/${orderId}`, { method: "DELETE" })
 
-      if (error) throw error
+      if (!res.ok) {
+        throw new Error("Failed to delete order")
+      }
 
       setOrders((prev) => prev.filter((o) => o.id !== orderId))
       toast.success("注文を削除しました")

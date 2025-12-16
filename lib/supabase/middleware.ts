@@ -39,6 +39,19 @@ export async function updateSession(request: NextRequest) {
     },
   })
 
+  // Cleanup legacy, non-HttpOnly auth cookie that may still be present on clients
+  const legacyCookies = ["supabase-auth-token"]
+  legacyCookies.forEach((name) => {
+    if (request.cookies.has(name)) {
+      response.cookies.set({
+        name,
+        value: "",
+        path: "/",
+        maxAge: 0,
+      })
+    }
+  })
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,

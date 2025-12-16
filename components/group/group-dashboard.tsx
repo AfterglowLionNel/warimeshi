@@ -3,7 +3,6 @@
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { createClient } from "@/lib/supabase/client"
 import type { User } from "@/lib/types/group"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -66,16 +65,13 @@ export function GroupDashboard({ user, tables: initialTables }: GroupDashboardPr
   const archivedTables = tables.filter((t) => t.is_archived)
 
   const handleArchive = async (tableId: string, archive: boolean) => {
-    const supabase = createClient()
-    const { error } = await supabase
-      .from("tables")
-      .update({
-        is_archived: archive,
-        archived_at: archive ? new Date().toISOString() : null,
-      })
-      .eq("id", tableId)
+    const res = await fetch("/api/tables/archive", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tableId, archive }),
+    })
 
-    if (error) {
+    if (!res.ok) {
       toast.error(archive ? "アーカイブに失敗しました" : "アーカイブ解除に失敗しました")
       return
     }
@@ -85,10 +81,9 @@ export function GroupDashboard({ user, tables: initialTables }: GroupDashboardPr
   }
 
   const handleDelete = async (tableId: string) => {
-    const supabase = createClient()
-    const { error } = await supabase.from("tables").delete().eq("id", tableId)
+    const res = await fetch(`/api/tables/${tableId}`, { method: "DELETE" })
 
-    if (error) {
+    if (!res.ok) {
       toast.error("削除に失敗しました")
       return
     }

@@ -1,7 +1,6 @@
 ﻿"use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { createClient } from "@/lib/supabase/client"
 import type { CalculationMode, FareSettings, Modifier, Segment, VehicleType } from "@/lib/types/taxi"
 import { formatCurrency } from "@/lib/utils/format"
 import { Button } from "@/components/ui/button"
@@ -58,8 +57,6 @@ export function TaxiCalculator({
   tableId,
   currentUserId,
 }: TaxiCalculatorProps) {
-  const supabase = createClient()
-
   const [vehicleType, setVehicleType] = useState<VehicleType>("taxi")
   const [taxiSettings, setTaxiSettings] = useState<FareSettings>(DEFAULT_TAXI_SETTINGS)
   const [daikoSettings, setDaikoSettings] = useState<FareSettings>(DEFAULT_DAIKO_SETTINGS)
@@ -110,40 +107,20 @@ export function TaxiCalculator({
 
   const fetchLatestRecord = async () => {
     if (!tableId) return
-    const { data, error } = await supabase
-      .from("taxi_records")
-      .select("*")
-      .eq("table_id", tableId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    if (error || !data) return
+    const res = await fetch(`/api/taxi-records?tableId=${tableId}`)
+    if (!res.ok) return
+    const json = (await res.json()) as { data?: any }
+    const data = json.data
+    if (!data) return
     if (lastRemoteCreatedAt.current && data.created_at <= lastRemoteCreatedAt.current) return
     applyRecord(data)
   }
 
   useEffect(() => {
     void fetchLatestRecord()
-  }, [supabase, tableId])
-
-  // Subscribe to realtime changes for instant reflection
-  useEffect(() => {
-    if (!tableId) return
-    const channel = supabase
-      .channel(`taxi-records-${tableId}`)
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "taxi_records", filter: `table_id=eq.${tableId}` },
-        (payload: any) => {
-          if (payload.new) applyRecord(payload.new)
-        },
-      )
-      .subscribe()
-    return () => {
-      void supabase.removeChannel(channel)
-    }
-  }, [supabase, tableId])
+    const interval = setInterval(fetchLatestRecord, 5000)
+    return () => clearInterval(interval)
+  }, [tableId])
 
   const updateSetting = (key: keyof FareSettings, raw: string, parser: (v: string) => number) => {
     const parsed = raw === "" ? Number.NaN : parser(raw)
@@ -276,32 +253,35 @@ export function TaxiCalculator({
 
     const save = async () => {
       setIsSaving(true)
-      const { error, data } = await supabase
-        .from("taxi_records")
-        .insert({
-          table_id: tableId,
-          created_by_user_id: currentUserId,
-          vehicle_type: vehicleType,
+      const res = await fetch("/api/taxi-records", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tableId,
+          vehicleType,
           mode,
           settings,
           input: { sameDistance, samePersonCount, segments, mode, vehicleType },
           result: results,
-        })
-        .select("*")
-        .single()
+        }),
+      })
       setIsSaving(false)
-      if (error) {
-        console.error("Failed to save taxi record:", error)
+      if (!res.ok) {
+        console.error("Failed to save taxi record:", await res.text())
         toast.error("保存に失敗しました")
         lastSavedHash.current = null
-      } else {
-        lastSavedHash.current = payloadHash
-        if (data?.created_at) lastRemoteCreatedAt.current = data.created_at
+        return
+      }
+
+      const json = (await res.json()) as { data?: { created_at?: string } }
+      lastSavedHash.current = payloadHash
+      if (json?.data?.created_at) {
+        lastRemoteCreatedAt.current = json.data.created_at
       }
     }
 
     void save()
-  }, [results, tableId, currentUserId, vehicleType, mode, settings, sameDistance, samePersonCount, segments, supabase])
+  }, [results, tableId, currentUserId, vehicleType, mode, settings, sameDistance, samePersonCount, segments])
 
   return (
     <div className="space-y-4">

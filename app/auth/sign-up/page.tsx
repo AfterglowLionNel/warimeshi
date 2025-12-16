@@ -2,7 +2,6 @@
 
 import type React from "react"
 
-import { createClient } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -35,7 +34,6 @@ function SignUpForm() {
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault()
-    const supabase = createClient()
     setIsLoading(true)
     setError(null)
 
@@ -52,40 +50,55 @@ function SignUpForm() {
     }
 
     try {
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: callbackUrl,
-          data: {
-            nickname: nickname || undefined,
-          },
-        },
+      const res = await fetch("/api/auth/sign-up", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password, nickname, redirectTo: callbackUrl }),
       })
-      if (error) throw error
+
+      if (!res.ok) {
+        const json = (await res.json().catch(() => null)) as { error?: string } | null
+        setError(json?.error || "登録に失敗しました")
+        return
+      }
+
       router.push("/auth/sign-up-success")
-    } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "登録に失敗しました")
+    } catch (error) {
+      console.error("[v0] signup error:", error)
+      setError("登録に失敗しました")
     } finally {
       setIsLoading(false)
     }
   }
 
   const handleGoogleSignUp = async () => {
-    const supabase = createClient()
     setIsGoogleLoading(true)
     setError(null)
 
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: callbackUrl,
-        },
+      const res = await fetch("/api/auth/oauth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: "google", redirectTo: callbackUrl }),
       })
-      if (error) throw error
-    } catch (error: unknown) {
-      setError(error instanceof Error ? error.message : "Google登録に失敗しました")
+
+      if (!res.ok) {
+        const json = (await res.json().catch(() => null)) as { error?: string } | null
+        setError(json?.error || "Google登録に失敗しました")
+        setIsGoogleLoading(false)
+        return
+      }
+
+      const { url } = (await res.json()) as { url?: string }
+      if (url) {
+        window.location.href = url
+      } else {
+        setError("Google登録に失敗しました")
+        setIsGoogleLoading(false)
+      }
+    } catch (error) {
+      console.error("[v0] Google signup error:", error)
+      setError("Google登録に失敗しました")
       setIsGoogleLoading(false)
     }
   }

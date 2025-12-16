@@ -5,7 +5,6 @@ import type React from "react"
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { createClient } from "@/lib/supabase/client"
 import type { User } from "@/lib/types/group"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -26,15 +25,17 @@ export function SettingsForm({ user }: SettingsFormProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
-    const supabase = createClient()
 
     try {
-      const { error } = await supabase
-        .from("users")
-        .update({ nickname: nickname.trim() || null })
-        .eq("id", user.id)
+      const res = await fetch("/api/users/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nickname }),
+      })
 
-      if (error) throw error
+      if (!res.ok) {
+        throw new Error("Failed to save settings")
+      }
 
       toast.success("設定を保存しました")
       router.refresh()

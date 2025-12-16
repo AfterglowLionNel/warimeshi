@@ -5,8 +5,8 @@ import { Analytics } from "@vercel/analytics/next"
 import { Toaster } from "@/components/ui/sonner"
 import "./globals.css"
 
-const _geist = Geist({ subsets: ["latin"] })
-const _geistMono = Geist_Mono({ subsets: ["latin"] })
+const _geist = Geist({ subsets: ["latin"], preload: false })
+const _geistMono = Geist_Mono({ subsets: ["latin"], preload: false })
 
 export const metadata: Metadata = {
   title: "warimeshi - 割り勘計算",
@@ -44,12 +44,14 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  const enableAnalytics = process.env.NEXT_PUBLIC_VERCEL_ANALYTICS === "1"
+
   return (
     <html lang="ja">
       <body className="font-sans antialiased">
         {children}
         <Toaster position="top-center" richColors />
-        <Analytics />
+        {enableAnalytics ? <Analytics /> : null}
       </body>
     </html>
   )

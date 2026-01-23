@@ -1,81 +1,113 @@
-import { redirect } from "next/navigation"
-import Link from "next/link"
-import { createClient } from "@/lib/supabase/server"
-import { TaxiCalculator } from "@/components/taxi/taxi-calculator"
-import { ArrowLeft, Calendar, Users } from "lucide-react"
-import { ArchivedTableNotice } from "@/components/group/archived-table-notice"
+import { redirect } from "next/navigation";
+import Link from "next/link";
+import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { users, tables, tableMembers } from "@/lib/db/schema";
+import { eq, and } from "drizzle-orm";
+import { TaxiCalculator } from "@/components/taxi/taxi-calculator";
+import { ArrowLeft, Calendar, Users } from "lucide-react";
+import { ArchivedTableNotice } from "@/components/group/archived-table-notice";
 
 export default async function TableTaxiPage({
   params,
 }: {
-  params: Promise<{ token: string }>
+  params: Promise<{ token: string }>;
 }) {
-  const { token } = await params
-  const supabase = await createClient()
+  const { token } = await params;
 
   // Get table by invite token
-  const { data: table, error: tableError } = await supabase
-    .from("tables")
-    .select("*")
-    .eq("invite_token", token)
-    .single()
+  const [table] = await db
+    .select()
+    .from(tables)
+    .where(eq(tables.inviteToken, token))
+    .limit(1);
 
-  if (tableError || !table) {
-    redirect("/group?error=table_not_found")
+  if (!table) {
+    redirect("/group?error=table_not_found");
   }
 
   // Check if user is logged in
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const session = await auth();
 
-  if (!user) {
-    redirect(`/auth/login?redirect=/group/table/${token}/taxi`)
+  if (!session?.user?.id) {
+    redirect(`/auth/login?redirect=/group/table/${token}/taxi`);
   }
 
   // Get user's DB record
-  const { data: dbUser } = await supabase.from("users").select("id").eq("firebase_uid", user.id).single()
+  let [dbUser] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.id, session.user.id))
+    .limit(1);
+
+  // Fallback to email search
+  if (!dbUser && session.user.email) {
+    [dbUser] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, session.user.email))
+      .limit(1);
+  }
+
+  // Create user if not exists
+  if (!dbUser && session.user.email) {
+    const nickname = session.user.name || session.user.email.split("@")[0] || "ユーザー";
+    try {
+      const [newUser] = await db
+        .insert(users)
+        .values({
+          id: session.user.id,
+          email: session.user.email,
+          nickname,
+          image: session.user.image ?? null,
+        })
+        .onConflictDoNothing()
+        .returning();
+      if (newUser) {
+        dbUser = { id: newUser.id };
+      }
+    } catch {
+      // Ignore creation errors
+    }
+  }
 
   if (!dbUser) {
-    redirect("/auth/error?error=user_not_found")
+    redirect("/auth/error?error=user_not_found");
   }
 
   // Archived tables are only accessible by the owner
-  if (table.is_archived && table.owner_user_id !== dbUser.id) {
-    const { data: ownerMember } = await supabase
-      .from("table_members")
-      .select("display_name")
-      .eq("table_id", table.id)
-      .eq("is_master", true)
-      .limit(1)
-      .single()
+  if (table.isArchived && table.ownerUserId !== dbUser.id) {
+    const [ownerMember] = await db
+      .select({ displayName: tableMembers.displayName })
+      .from(tableMembers)
+      .where(and(eq(tableMembers.tableId, table.id), eq(tableMembers.isMaster, true)))
+      .limit(1);
 
     return (
       <ArchivedTableNotice
         tableName={table.name}
-        eventDate={table.event_date}
-        ownerName={ownerMember?.display_name || "作成者"}
+        eventDate={table.eventDate.toISOString().split("T")[0]}
+        ownerName={ownerMember?.displayName || "作成者"}
       />
-    )
+    );
   }
 
   // Check if user is a member
-  const { data: membership } = await supabase
-    .from("table_members")
-    .select("id")
-    .eq("table_id", table.id)
-    .eq("user_id", dbUser.id)
-    .single()
+  const [membership] = await db
+    .select({ id: tableMembers.id })
+    .from(tableMembers)
+    .where(and(eq(tableMembers.tableId, table.id), eq(tableMembers.userId, dbUser.id)))
+    .limit(1);
 
   if (!membership) {
-    redirect(`/group/join/${token}`)
+    redirect(`/group/join/${token}`);
   }
 
-  // Get member count (fetch ids to avoid empty count results)
-  const { data: members } = await supabase
-    .from("table_members")
-    .select("id")
-    .eq("table_id", table.id)
+  // Get member count
+  const members = await db
+    .select({ id: tableMembers.id })
+    .from(tableMembers)
+    .where(eq(tableMembers.tableId, table.id));
 
   return (
     <main className="min-h-screen flex flex-col">
@@ -93,11 +125,11 @@ export default async function TableTaxiPage({
           <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
             <span className="flex items-center gap-1">
               <Calendar className="h-3 w-3" />
-              {new Date(table.event_date).toLocaleDateString("ja-JP")}
+              {table.eventDate.toLocaleDateString("ja-JP")}
             </span>
             <span className="flex items-center gap-1">
               <Users className="h-3 w-3" />
-              {(members?.length || 0)}人
+              {members.length}人
             </span>
           </div>
           <p className="text-sm text-muted-foreground mt-2">タクシー・代行計算</p>
@@ -108,5 +140,5 @@ export default async function TableTaxiPage({
         <TaxiCalculator showBackLink={false} tableId={table.id} currentUserId={dbUser.id} />
       </div>
     </main>
-  )
+  );
 }

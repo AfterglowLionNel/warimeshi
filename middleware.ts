@@ -1,83 +1,56 @@
-import { NextResponse, type NextRequest } from "next/server"
-import { updateSession } from "@/lib/supabase/middleware"
+import { NextResponse, type NextRequest } from "next/server";
+import { auth } from "@/auth";
 
-const PROTECTED_PREFIXES = ["/group", "/solo", "/settings"]
+const PROTECTED_PREFIXES = ["/settings"];
 
-function buildCsp(nonce: string) {
+function buildCsp() {
   const csp = `
     default-src 'self';
-    script-src 'self' 'unsafe-inline';
+    script-src 'self' 'unsafe-inline' 'unsafe-eval';
     style-src 'self' 'unsafe-inline';
     img-src 'self' data: blob: https:;
     font-src 'self' data: https:;
-    connect-src 'self' https://*.supabase.co wss://*.supabase.co https://vitals.vercel-insights.com;
+    connect-src 'self' https:;
     media-src 'self' https:;
     object-src 'none';
     base-uri 'self';
     frame-ancestors 'none';
-    form-action 'self';
-    upgrade-insecure-requests;
+    form-action 'self' https://accounts.google.com https://access.line.me;
   `
     .replace(/\s{2,}/g, " ")
-    .trim()
+    .trim();
 
-  return csp
+  return csp;
 }
 
-export async function middleware(request: NextRequest) {
-  const csp = buildCsp("")
-  const res = await updateSession(request)
-
-  res.headers.set("Content-Security-Policy", csp)
-
-  const supabaseProjectRef = process.env.NEXT_PUBLIC_SUPABASE_URL
-    ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname.split(".")[0]
-    : ""
-  const supabaseCookiePrefix = supabaseProjectRef ? `sb-${supabaseProjectRef}-auth-token` : "sb-"
-
-  const { pathname } = request.nextUrl
-  const isProtected = PROTECTED_PREFIXES.some((p) => pathname.startsWith(p))
-  const alreadyRedirecting = res.headers.get("location")
-  const cookieNames = request.cookies.getAll().map((c) => c.name)
-  const hasSupabaseSessionCookie = cookieNames.some(
-    (name) =>
-      name === "supabase-auth-token" ||
-      name.startsWith(supabaseCookiePrefix) ||
-      name === "sb-access-token" ||
-      name === "sb-refresh-token",
-  )
+export default auth((req) => {
+  const { pathname } = req.nextUrl;
+  const csp = buildCsp();
+  const isProtected = PROTECTED_PREFIXES.some((p) => pathname.startsWith(p));
+  const isAuthenticated = !!req.auth;
 
   console.log("[mw-guard]", {
     pathname,
-    cookieNames,
-    supabaseCookiePrefix,
-    hasSupabaseSessionCookie,
-    alreadyRedirecting,
-  })
+    isAuthenticated,
+    userId: req.auth?.user?.id,
+  });
 
-  const hasAuthCookie = hasSupabaseSessionCookie
+  if (isProtected && !isAuthenticated) {
+    const base = process.env.AUTH_URL || process.env.NEXT_PUBLIC_SITE_URL || "https://warimeshi.com";
+    const url = new URL(base);
+    url.pathname = "/auth/login";
+    url.searchParams.set("redirect", pathname);
 
-  if (alreadyRedirecting) {
-    return res
+    const redirectRes = NextResponse.redirect(url.toString());
+    redirectRes.headers.set("Content-Security-Policy", csp);
+    return redirectRes;
   }
 
-  if (isProtected && !hasAuthCookie) {
-    const base = process.env.NEXT_PUBLIC_SITE_URL || "https://warimeshi.com"
-    const url = new URL(base)
-    url.pathname = "/auth/login"
-    url.searchParams.set("redirect", pathname)
-
-    const redirectRes = NextResponse.redirect(url.toString())
-    redirectRes.headers.set("Content-Security-Policy", csp)
-    return redirectRes
-  }
-
-  return NextResponse.next({
-    request: { headers: request.headers },
-    headers: res.headers,
-  })
-}
+  const res = NextResponse.next();
+  res.headers.set("Content-Security-Policy", csp);
+  return res;
+});
 
 export const config = {
   matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
-}
+};

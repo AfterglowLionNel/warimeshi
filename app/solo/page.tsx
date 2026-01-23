@@ -1,9 +1,19 @@
+"use client"
+
+import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { ArrowLeft, Plus, History } from "lucide-react"
 
 export default function SoloEntryPage() {
+  const router = useRouter()
+
+  const handleNewSession = () => {
+    const sessionId = `solo-${Date.now()}`
+    router.push(`/solo/${sessionId}`)
+  }
+
   return (
     <main className="min-h-screen flex flex-col">
       {/* Header */}
@@ -24,6 +34,10 @@ export default function SoloEntryPage() {
       {/* Main Content */}
       <div className="flex-1 container mx-auto px-4 py-8">
         <div className="max-w-md mx-auto space-y-4">
+          <p className="text-sm text-muted-foreground text-center bg-muted/50 p-3 rounded-lg">
+            ※ データは端末に保存され、他のデバイスとは共有されません
+          </p>
+
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -33,8 +47,8 @@ export default function SoloEntryPage() {
               <CardDescription>新しい注文記録を始めます</CardDescription>
             </CardHeader>
             <CardContent>
-              <Button asChild className="w-full">
-                <Link href="/solo/new">新規作成</Link>
+              <Button className="w-full" onClick={handleNewSession}>
+                新規作成
               </Button>
             </CardContent>
           </Card>

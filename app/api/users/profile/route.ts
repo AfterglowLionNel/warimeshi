@@ -1,50 +1,76 @@
-import { NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import { NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { users } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 
 export async function PATCH(request: Request) {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const session = await auth();
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await request.json().catch(() => null)
-  const nickname = body?.nickname as string | undefined
+  const body = await request.json().catch(() => null);
+  const nickname = body?.nickname as string | undefined;
 
   if (nickname === undefined) {
-    return NextResponse.json({ error: "Invalid payload" }, { status: 400 })
+    return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
   }
 
-  const { error } = await supabase
-    .from("users")
-    .update({ nickname: nickname.trim() || null })
-    .eq("firebase_uid", user.id)
+  try {
+    // Try to update by session ID first
+    const result = await db
+      .update(users)
+      .set({
+        nickname: nickname.trim() || null,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, session.user.id));
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 400 })
+    // If no rows updated and we have email, try by email
+    if (result.rowCount === 0 && session.user.email) {
+      await db
+        .update(users)
+        .set({
+          nickname: nickname.trim() || null,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.email, session.user.email));
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Profile update error:", error);
+    return NextResponse.json({ error: "Failed to update profile" }, { status: 400 });
   }
-
-  return NextResponse.json({ success: true })
 }
 
 export async function GET() {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const session = await auth();
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { data: dbUser } = await supabase.from("users").select("nickname").eq("firebase_uid", user.id).single()
+  let [dbUser] = await db
+    .select({ nickname: users.nickname, email: users.email, image: users.image })
+    .from(users)
+    .where(eq(users.id, session.user.id))
+    .limit(1);
+
+  // Fallback to email search if user not found by ID
+  if (!dbUser && session.user.email) {
+    [dbUser] = await db
+      .select({ nickname: users.nickname, email: users.email, image: users.image })
+      .from(users)
+      .where(eq(users.email, session.user.email))
+      .limit(1);
+  }
 
   return NextResponse.json({
-    email: user.email,
+    email: session.user.email ?? dbUser?.email,
     nickname: dbUser?.nickname ?? null,
-    userMetadata: user.user_metadata ?? {},
-  })
+    image: session.user.image ?? dbUser?.image ?? null,
+  });
 }

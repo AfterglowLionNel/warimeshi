@@ -16,6 +16,8 @@ export interface Table {
   invite_token: string
   is_archived: boolean
   archived_at: string | null
+  is_locked: boolean
+  auto_lock_at: string | null
   created_at: string
   updated_at: string
 }
@@ -23,9 +25,11 @@ export interface Table {
 export interface TableMember {
   id: string
   table_id: string
-  user_id: string
+  user_id: string | null
   display_name: string
   is_master: boolean
+  is_guest: boolean
+  added_by_user_id: string | null
   joined_at: string
   user?: User
 }

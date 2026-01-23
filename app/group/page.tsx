@@ -1,92 +1,136 @@
-import { redirect } from "next/navigation"
-import { createClient } from "@/lib/supabase/server"
-import { GroupDashboard } from "@/components/group/group-dashboard"
+import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { users, tables, tableMembers } from "@/lib/db/schema";
+import { eq, inArray, desc } from "drizzle-orm";
+import { GroupPageClient } from "@/components/group/group-page-client";
 
 export default async function GroupPage() {
-  const supabase = await createClient()
+  const session = await auth();
 
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
-
-  if (authError || !user) {
-    redirect("/auth/login?redirect=/group")
+  // If no session, render the client component which will handle guest auth
+  if (!session?.user?.id) {
+    return <GroupPageClient serverUser={null} serverTables={[]} />;
   }
 
   // Get or create user in our users table
-  let { data: dbUser } = await supabase.from("users").select("*").eq("firebase_uid", user.id).single()
+  let [dbUser] = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, session.user.id))
+    .limit(1);
 
   if (!dbUser) {
-    // Create user record
-    const nickname = user.user_metadata?.nickname || user.user_metadata?.name || user.email?.split("@")[0] || "ユーザー"
+    // Create user record (shouldn't happen with Auth.js adapter, but handle edge case)
+    const nickname = session.user.name || session.user.email?.split("@")[0] || "ユーザー";
 
-    const { data: newUser, error: createError } = await supabase
-      .from("users")
-      .insert({
-        firebase_uid: user.id,
-        email: user.email,
-        nickname,
-      })
-      .select()
-      .single()
+    try {
+      const [newUser] = await db
+        .insert(users)
+        .values({
+          id: session.user.id,
+          email: session.user.email ?? null,
+          nickname,
+        })
+        .onConflictDoNothing()
+        .returning();
 
-    if (createError) {
-      console.error("Failed to create user:", createError)
-      redirect("/auth/error?error=user_creation_failed")
+      if (newUser) {
+        dbUser = newUser;
+      } else {
+        // Email conflict - try to find existing user by email
+        const [existingUser] = await db
+          .select()
+          .from(users)
+          .where(eq(users.email, session.user.email!))
+          .limit(1);
+        if (existingUser) {
+          dbUser = existingUser;
+        } else {
+          return <GroupPageClient serverUser={null} serverTables={[]} />;
+        }
+      }
+    } catch {
+      // Fallback: try to find by email
+      const [existingUser] = await db
+        .select()
+        .from(users)
+        .where(eq(users.email, session.user.email!))
+        .limit(1);
+      if (existingUser) {
+        dbUser = existingUser;
+      } else {
+        return <GroupPageClient serverUser={null} serverTables={[]} />;
+      }
     }
-
-    dbUser = newUser
   }
 
   // Get tables where user is a member
-  const { data: memberships } = await supabase
-    .from("table_members")
-    .select("table_id, is_master, display_name")
-    .eq("user_id", dbUser.id)
+  const memberships = await db
+    .select({
+      tableId: tableMembers.tableId,
+      isMaster: tableMembers.isMaster,
+      displayName: tableMembers.displayName,
+    })
+    .from(tableMembers)
+    .where(eq(tableMembers.userId, dbUser.id));
 
-  const tableIds = memberships?.map((m) => m.table_id) || []
+  const tableIds = memberships.map((m) => m.tableId);
 
-  let tables: Array<{
-    id: string
-    name: string
-    event_date: string
-    invite_token: string
-    is_archived: boolean
-    is_master: boolean
-    member_count: number
-  }> = []
+  let tablesWithDetails: Array<{
+    id: string;
+    name: string;
+    event_date: string;
+    invite_token: string;
+    is_archived: boolean;
+    is_master: boolean;
+    member_count: number;
+  }> = [];
 
   if (tableIds.length > 0) {
-    const { data: tablesData } = await supabase
-      .from("tables")
-      .select("*")
-      .in("id", tableIds)
-      .order("event_date", { ascending: false })
+    const tablesData = await db
+      .select()
+      .from(tables)
+      .where(inArray(tables.id, tableIds))
+      .orderBy(desc(tables.eventDate));
 
-    if (tablesData) {
+    if (tablesData.length > 0) {
       // Get member counts for each table
       const memberCounts = await Promise.all(
         tablesData.map(async (table) => {
-          const { count } = await supabase
-            .from("table_members")
-            .select("*", { count: "exact", head: true })
-            .eq("table_id", table.id)
-          return { tableId: table.id, count: count || 0 }
-        }),
-      )
+          const members = await db
+            .select({ id: tableMembers.id })
+            .from(tableMembers)
+            .where(eq(tableMembers.tableId, table.id));
+          return { tableId: table.id, count: members.length };
+        })
+      );
 
-      tables = tablesData.map((table) => {
-        const membership = memberships?.find((m) => m.table_id === table.id)
-        const countData = memberCounts.find((c) => c.tableId === table.id)
+      tablesWithDetails = tablesData.map((table) => {
+        const membership = memberships.find((m) => m.tableId === table.id);
+        const countData = memberCounts.find((c) => c.tableId === table.id);
         return {
-          ...table,
-          is_master: membership?.is_master || false,
+          id: table.id,
+          name: table.name,
+          event_date: table.eventDate.toISOString().split("T")[0],
+          invite_token: table.inviteToken,
+          is_archived: table.isArchived,
+          is_master: membership?.isMaster || false,
           member_count: countData?.count || 0,
-        }
-      })
+        };
+      });
     }
   }
 
-  return <GroupDashboard user={dbUser} tables={tables} />
+  // Convert dbUser to expected format
+  const userForComponent = {
+    id: dbUser.id,
+    firebase_uid: dbUser.id,
+    email: dbUser.email,
+    nickname: dbUser.nickname,
+    is_admin: dbUser.isAdmin,
+    created_at: dbUser.createdAt.toISOString(),
+    updated_at: dbUser.updatedAt.toISOString(),
+  };
+
+  return <GroupPageClient serverUser={userForComponent} serverTables={tablesWithDetails} />;
 }

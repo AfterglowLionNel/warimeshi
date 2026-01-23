@@ -33,15 +33,21 @@ import {
   Check,
   Copy,
   Crown,
+  Lock,
+  LockOpen,
   Pencil,
   Plus,
   Save,
   Search,
   Trash2,
   Users,
+  UserPlus,
   X,
 } from "lucide-react"
 import { toast } from "sonner"
+import { InviteQRCode } from "./invite-qr-code"
+import { InviteShareButton } from "./invite-share-button"
+import { getGuestToken } from "@/lib/guest/guest-session"
 
 interface TableDetailClientProps {
   table: Table
@@ -49,6 +55,7 @@ interface TableDetailClientProps {
   currentMembership: TableMember
   initialMembers: (TableMember & { user?: User })[]
   initialOrders: (Order & { member?: TableMember })[]
+  isGuestUser?: boolean
 }
 
 type SortField = "display_name" | "unit_price" | "quantity" | "created_at"
@@ -58,12 +65,62 @@ const ITEMS_PER_PAGE = 10
 const POLL_INTERVAL = 5000
 const MEMBER_COLORS = ["#e0f2fe", "#fef9c3", "#f5f3ff", "#ecfccb", "#f1f5f9", "#ffe4e6", "#f0f9ff", "#fef2f2"]
 
+// Helper to map API response (camelCase) to component format (snake_case)
+function mapMemberFromApi(m: any): TableMember & { user?: User } {
+  return {
+    id: m.id,
+    table_id: m.tableId ?? m.table_id,
+    user_id: m.userId ?? m.user_id,
+    display_name: m.displayName ?? m.display_name,
+    is_master: m.isMaster ?? m.is_master,
+    is_guest: m.isGuest ?? m.is_guest,
+    added_by_user_id: m.addedByUserId ?? m.added_by_user_id,
+    joined_at: m.joinedAt ?? m.joined_at,
+    user: m.user ? {
+      id: m.user.id,
+      firebase_uid: m.user.id,
+      email: m.user.email,
+      nickname: m.user.nickname,
+      is_admin: m.user.isAdmin ?? m.user.is_admin,
+      created_at: m.user.createdAt ?? m.user.created_at,
+      updated_at: m.user.updatedAt ?? m.user.updated_at,
+    } : undefined,
+  }
+}
+
+function mapOrderFromApi(o: any): Order & { member?: TableMember } {
+  return {
+    id: o.id,
+    table_id: o.tableId ?? o.table_id,
+    member_id: o.memberId ?? o.member_id,
+    created_by_user_id: o.createdByUserId ?? o.created_by_user_id,
+    item_name: o.itemName ?? o.item_name,
+    unit_price: o.unitPrice ?? o.unit_price,
+    quantity: o.quantity,
+    line_total: o.lineTotal ?? o.line_total,
+    deleted_at: o.deletedAt ?? o.deleted_at,
+    created_at: o.createdAt ?? o.created_at,
+    updated_at: o.updatedAt ?? o.updated_at,
+    member: o.member ? mapMemberFromApi(o.member) : undefined,
+  }
+}
+
+function getApiHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {}
+  const guestToken = getGuestToken()
+  if (guestToken) {
+    headers["X-Guest-Token"] = guestToken
+  }
+  return headers
+}
+
 export function TableDetailClient({
   table,
   currentUser,
   currentMembership,
   initialMembers,
   initialOrders,
+  isGuestUser = false,
 }: TableDetailClientProps) {
   const isTableOwner = table.owner_user_id === currentUser.id
 
@@ -91,6 +148,22 @@ export function TableDetailClient({
     quantity: string
   } | null>(null)
 
+  // Simple split state
+  const [splitPeopleCount, setSplitPeopleCount] = useState<string>("")
+
+  // Guest member state
+  const [showGuestForm, setShowGuestForm] = useState(false)
+  const [guestName, setGuestName] = useState("")
+  const [isAddingGuest, setIsAddingGuest] = useState(false)
+
+  // Lock state
+  const [isLocked, setIsLocked] = useState(table.is_locked)
+  const [autoLockAt, setAutoLockAt] = useState<string | null>(table.auto_lock_at)
+  const [isTogglingLock, setIsTogglingLock] = useState(false)
+
+  // Calculate effective lock status
+  const isEffectivelyLocked = isLocked || (autoLockAt && new Date(autoLockAt) < new Date())
+
   const memberColorMap = useMemo(() => {
     const sortedMembers = [...members].sort((a, b) => a.id.localeCompare(b.id))
     return sortedMembers.reduce<Record<string, string>>((acc, member, idx) => {
@@ -101,19 +174,20 @@ export function TableDetailClient({
 
   useEffect(() => {
     const fetchUpdates = async () => {
+      const headers = getApiHeaders()
       try {
         const [membersRes, ordersRes] = await Promise.all([
-          fetch(`/api/table-members?tableId=${table.id}`),
-          fetch(`/api/orders?tableId=${table.id}`),
+          fetch(`/api/table-members?tableId=${table.id}`, { headers }),
+          fetch(`/api/orders?tableId=${table.id}`, { headers }),
         ])
 
         if (membersRes.ok) {
-          const json = (await membersRes.json()) as { data?: (TableMember & { user?: User })[] }
-          if (json.data) setMembers(json.data)
+          const json = (await membersRes.json()) as { data?: any[] }
+          if (json.data) setMembers(json.data.map(mapMemberFromApi))
         }
         if (ordersRes.ok) {
-          const json = (await ordersRes.json()) as { data?: (Order & { member?: TableMember })[] }
-          if (json.data) setOrders(json.data)
+          const json = (await ordersRes.json()) as { data?: any[] }
+          if (json.data) setOrders(json.data.map(mapOrderFromApi))
         }
       } catch (err) {
         console.error("Failed to poll updates", err)
@@ -191,7 +265,7 @@ export function TableDetailClient({
 
       const res = await fetch("/api/orders", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getApiHeaders() },
         body: JSON.stringify({ orders: inserts }),
       })
 
@@ -204,10 +278,10 @@ export function TableDetailClient({
       setQuantity("1")
       toast.success("注文を追加しました")
 
-      const refreshed = await fetch(`/api/orders?tableId=${table.id}`)
+      const refreshed = await fetch(`/api/orders?tableId=${table.id}`, { headers: getApiHeaders() })
       if (refreshed.ok) {
-        const json = (await refreshed.json()) as { data?: (Order & { member?: TableMember })[] }
-        if (json.data) setOrders(json.data)
+        const json = (await refreshed.json()) as { data?: any[] }
+        if (json.data) setOrders(json.data.map(mapOrderFromApi))
       }
     } catch (error) {
       console.error("Error adding order:", error)
@@ -246,7 +320,7 @@ export function TableDetailClient({
     try {
       const res = await fetch(`/api/orders/${orderId}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getApiHeaders() },
         body: JSON.stringify({
           updates: {
             member_id: editForm.member_id,
@@ -266,10 +340,10 @@ export function TableDetailClient({
       toast.success("注文を更新しました")
       cancelEdit()
 
-      const refreshed = await fetch(`/api/orders?tableId=${table.id}`)
+      const refreshed = await fetch(`/api/orders?tableId=${table.id}`, { headers: getApiHeaders() })
       if (refreshed.ok) {
-        const json = (await refreshed.json()) as { data?: (Order & { member?: TableMember })[] }
-        if (json.data) setOrders(json.data)
+        const json = (await refreshed.json()) as { data?: any[] }
+        if (json.data) setOrders(json.data.map(mapOrderFromApi))
       }
     } catch (error) {
       console.error("Error updating order:", error)
@@ -280,7 +354,7 @@ export function TableDetailClient({
 
   const deleteOrder = async (orderId: string) => {
     try {
-      const res = await fetch(`/api/orders/${orderId}`, { method: "DELETE" })
+      const res = await fetch(`/api/orders/${orderId}`, { method: "DELETE", headers: getApiHeaders() })
 
       if (!res.ok) {
         throw new Error("Failed to delete order")
@@ -342,6 +416,107 @@ export function TableDetailClient({
   const canManageOrder = (order: Order & { member?: TableMember }) =>
     isTableOwner || order.created_by_user_id === currentUser.id || (order.member && order.member.user_id === currentUser.id)
 
+  const canDeleteMember = (member: TableMember & { user?: User }) => {
+    if (member.is_master) return false
+    if (isTableOwner) return true
+    if (member.is_guest && member.added_by_user_id === currentUser.id) return true
+    if (!member.is_guest && member.user_id === currentUser.id) return true
+    return false
+  }
+
+  const handleAddGuest = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!guestName.trim()) {
+      toast.error("名前を入力してください")
+      return
+    }
+
+    setIsAddingGuest(true)
+    try {
+      const res = await fetch("/api/table-members", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getApiHeaders() },
+        body: JSON.stringify({
+          tableId: table.id,
+          displayName: guestName.trim(),
+          isGuest: true,
+        }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || "Failed to add guest")
+      }
+
+      setGuestName("")
+      setShowGuestForm(false)
+      toast.success("ゲストメンバーを追加しました")
+
+      // Refresh members
+      const refreshed = await fetch(`/api/table-members?tableId=${table.id}`, { headers: getApiHeaders() })
+      if (refreshed.ok) {
+        const json = (await refreshed.json()) as { data?: any[] }
+        if (json.data) setMembers(json.data.map(mapMemberFromApi))
+      }
+    } catch (error) {
+      console.error("Error adding guest:", error)
+      const message = error instanceof Error ? error.message : "ゲストの追加に失敗しました"
+      toast.error(message)
+    } finally {
+      setIsAddingGuest(false)
+    }
+  }
+
+  const handleDeleteMember = async (memberId: string) => {
+    try {
+      const res = await fetch(`/api/table-members?memberId=${memberId}`, { method: "DELETE", headers: getApiHeaders() })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || "Failed to delete member")
+      }
+
+      setMembers((prev) => prev.filter((m) => m.id !== memberId))
+      toast.success("メンバーを削除しました")
+    } catch (error) {
+      console.error("Error deleting member:", error)
+      const message = error instanceof Error ? error.message : "削除に失敗しました"
+      toast.error(message)
+    }
+  }
+
+  const handleToggleLock = async () => {
+    if (!isTableOwner) return
+
+    setIsTogglingLock(true)
+    try {
+      const res = await fetch(`/api/tables/${table.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...getApiHeaders() },
+        body: JSON.stringify({ isLocked: !isEffectivelyLocked }),
+      })
+
+      if (!res.ok) {
+        throw new Error("Failed to toggle lock")
+      }
+
+      const data = await res.json()
+      setIsLocked(data.isLocked)
+      setAutoLockAt(data.autoLockAt)
+
+      if (data.isLocked) {
+        toast.success("新規参加を締め切りました")
+      } else {
+        toast.success("参加を再開しました")
+      }
+    } catch (error) {
+      console.error("Error toggling lock:", error)
+      toast.error("操作に失敗しました")
+    } finally {
+      setIsTogglingLock(false)
+    }
+  }
+
   const totals = useMemo(() => {
     const totalQuantity = orders.reduce((sum, o) => sum + o.quantity, 0)
     const totalAmount = orders.reduce((sum, o) => sum + o.line_total, 0)
@@ -396,43 +571,151 @@ export function TableDetailClient({
 
       <div className="flex-1 container mx-auto px-4 py-4 space-y-4">
         <Card>
-          <CardContent className="p-4">
-            <Label className="text-sm text-muted-foreground">招待リンク</Label>
-            <div className="flex items-center gap-2 mt-1">
-              <Input
-                value={`${typeof window !== "undefined" ? window.location.origin : ""}/group/join/${table.invite_token}`}
-                readOnly
-                className="text-xs"
-              />
-              <Button variant="outline" size="icon" onClick={handleCopyLink}>
-                {isCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-              </Button>
+          <CardContent className="p-4 space-y-3">
+            <div>
+              <Label className="text-sm text-muted-foreground">招待リンク</Label>
+              <div className="flex items-center gap-2 mt-1">
+                <Input
+                  value={`${typeof window !== "undefined" ? window.location.origin : ""}/group/join/${table.invite_token}`}
+                  readOnly
+                  className="text-xs"
+                />
+                <Button variant="outline" size="icon" onClick={handleCopyLink} title="コピー">
+                  {isCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                </Button>
+                <InviteQRCode
+                  inviteUrl={`${typeof window !== "undefined" ? window.location.origin : ""}/group/join/${table.invite_token}`}
+                  tableName={table.name}
+                />
+                <InviteShareButton
+                  inviteUrl={`${typeof window !== "undefined" ? window.location.origin : ""}/group/join/${table.invite_token}`}
+                  tableName={table.name}
+                />
+              </div>
             </div>
+
+            {isTableOwner && (
+              <div className="flex items-center justify-between pt-2 border-t">
+                <div className="flex items-center gap-2">
+                  {isEffectivelyLocked ? (
+                    <Lock className="h-4 w-4 text-amber-600" />
+                  ) : (
+                    <LockOpen className="h-4 w-4 text-muted-foreground" />
+                  )}
+                  <span className="text-sm">
+                    {isEffectivelyLocked ? (
+                      <span className="text-amber-600">新規参加を締め切り中</span>
+                    ) : (
+                      <span className="text-muted-foreground">参加を受付中</span>
+                    )}
+                  </span>
+                </div>
+                <Button
+                  variant={isEffectivelyLocked ? "default" : "outline"}
+                  size="sm"
+                  onClick={handleToggleLock}
+                  disabled={isTogglingLock}
+                >
+                  {isEffectivelyLocked ? "参加を再開" : "参加を締め切る"}
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Users className="h-4 w-4" />
-              メンバー ({members.length}人)
+            <CardTitle className="text-base flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Users className="h-4 w-4" />
+                メンバー ({members.length}人)
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowGuestForm(!showGuestForm)}
+              >
+                <UserPlus className="h-4 w-4 mr-1" />
+                ゲスト追加
+              </Button>
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
+            {showGuestForm && (
+              <form onSubmit={handleAddGuest} className="flex gap-2 p-3 bg-muted rounded-lg">
+                <Input
+                  placeholder="ゲストの名前"
+                  value={guestName}
+                  onChange={(e) => setGuestName(e.target.value)}
+                  className="flex-1"
+                />
+                <Button type="submit" size="sm" disabled={isAddingGuest}>
+                  追加
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setShowGuestForm(false)
+                    setGuestName("")
+                  }}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </form>
+            )}
             <div className="flex flex-wrap gap-2">
               {members.map((member) => (
                 <Badge
                   key={member.id}
                   variant={member.id === currentMembership.id ? "default" : "secondary"}
-                  className="flex items-center gap-1 text-black"
+                  className="flex items-center gap-1 text-black group"
                   style={{
                     backgroundColor: memberColorMap[member.id] || undefined,
-                    border: member.id === currentMembership.id ? "2px solid #ef4444" : undefined,
+                    border: member.is_guest
+                      ? "1px dashed #888"
+                      : member.id === currentMembership.id
+                        ? "2px solid #ef4444"
+                        : undefined,
                   }}
                 >
                   {member.is_master && <Crown className="h-3 w-3" />}
                   {member.display_name}
+                  {member.is_guest && <span className="text-xs text-muted-foreground">(ゲスト)</span>}
                   {member.id === currentMembership.id && " (あなた)"}
+                  {canDeleteMember(member) && (
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <button
+                          type="button"
+                          className="ml-1 opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>
+                            {member.display_name}を削除しますか？
+                          </AlertDialogTitle>
+                          <AlertDialogDescription>
+                            このメンバーの注文データも削除されます。この操作は取り消せません。
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>キャンセル</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={() => handleDeleteMember(member.id)}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          >
+                            削除する
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  )}
                 </Badge>
               ))}
             </div>
@@ -460,6 +743,7 @@ export function TableDetailClient({
                       {members.map((m) => (
                         <SelectItem key={m.id} value={m.id}>
                           {m.display_name}
+                          {m.is_guest && " (ゲスト)"}
                           {m.id === currentMembership.id && " (あなた)"}
                         </SelectItem>
                       ))}
@@ -570,12 +854,123 @@ export function TableDetailClient({
               </p>
             ) : (
               <>
-                <div className="overflow-x-auto -mx-4 px-4">
+                {/* Mobile Card View */}
+                <div className="sm:hidden space-y-2">
+                  {paginatedOrders.map((order) => (
+                    <div
+                      key={order.id}
+                      className="border rounded-lg p-3"
+                      style={{ backgroundColor: memberColorMap[order.member_id] ? `${memberColorMap[order.member_id]}50` : undefined }}
+                    >
+                      {editingOrderId === order.id && editForm ? (
+                        <div className="space-y-2">
+                          <Select
+                            value={editForm.member_id}
+                            onValueChange={(v) => setEditForm({ ...editForm, member_id: v })}
+                          >
+                            <SelectTrigger className="h-9">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {members.map((m) => (
+                                <SelectItem key={m.id} value={m.id}>
+                                  {m.display_name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Input
+                            placeholder="商品名"
+                            value={editForm.item_name}
+                            onChange={(e) => setEditForm({ ...editForm, item_name: e.target.value })}
+                          />
+                          <div className="flex gap-2">
+                            <Input
+                              type="number"
+                              placeholder="単価"
+                              min="0"
+                              value={editForm.unit_price}
+                              onChange={(e) => setEditForm({ ...editForm, unit_price: e.target.value })}
+                            />
+                            <Input
+                              type="number"
+                              placeholder="数量"
+                              min="1"
+                              className="w-20"
+                              value={editForm.quantity}
+                              onChange={(e) => setEditForm({ ...editForm, quantity: e.target.value })}
+                            />
+                          </div>
+                          <div className="flex justify-between items-center pt-2">
+                            <span className="font-bold">
+                              {formatCurrency((Number.parseInt(editForm.unit_price) || 0) * (Number.parseInt(editForm.quantity) || 1))}
+                            </span>
+                            <div className="flex gap-2">
+                              <Button size="sm" variant="outline" onClick={cancelEdit}>
+                                <X className="h-4 w-4" />
+                              </Button>
+                              <Button size="sm" onClick={() => saveEdit(order.id)}>
+                                <Save className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-medium text-sm truncate">{order.member?.display_name}</span>
+                              {order.item_name && (
+                                <span className="text-muted-foreground text-sm truncate">- {order.item_name}</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3 text-sm">
+                              <span className="text-muted-foreground">{formatCurrency(order.unit_price)} × {order.quantity}</span>
+                              <span className="font-bold text-primary">{formatCurrency(order.line_total)}</span>
+                            </div>
+                          </div>
+                          {canManageOrder(order) && (
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => startEdit(order)}>
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive">
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>注文を削除しますか？</AlertDialogTitle>
+                                    <AlertDialogDescription>この操作は取り消せません。</AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel>キャンセル</AlertDialogCancel>
+                                    <AlertDialogAction
+                                      onClick={() => deleteOrder(order.id)}
+                                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                    >
+                                      削除する
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Desktop Table View */}
+                <div className="hidden sm:block overflow-x-auto -mx-4 px-4">
                   <UITable>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="min-w-[100px]">名前</TableHead>
-                        <TableHead className="min-w-[120px]">商品名</TableHead>
+                        <TableHead>名前</TableHead>
+                        <TableHead>商品名</TableHead>
                         <TableHead className="text-right">単価</TableHead>
                         <TableHead className="text-right">数量</TableHead>
                         <TableHead className="text-right">小計</TableHead>
@@ -746,6 +1141,32 @@ export function TableDetailClient({
               <div className="p-3 bg-primary/10 rounded-lg">
                 <p className="text-sm text-muted-foreground">合計金額</p>
                 <p className="text-2xl font-bold text-primary">{formatCurrency(totals.totalAmount)}</p>
+              </div>
+            </div>
+
+            <div className="border rounded-lg p-4 bg-muted/30">
+              <Label className="text-sm font-medium">簡単割り勘</Label>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3 mt-2">
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min="1"
+                    placeholder={String(members.length)}
+                    value={splitPeopleCount}
+                    onChange={(e) => setSplitPeopleCount(e.target.value)}
+                    className="w-20"
+                  />
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">人で割る</span>
+                </div>
+                <div className="flex items-center justify-between sm:ml-auto">
+                  <span className="text-sm text-muted-foreground sm:hidden">一人あたり</span>
+                  <span className="text-xl font-bold text-primary">
+                    <span className="hidden sm:inline">一人あたり: </span>
+                    {formatCurrency(
+                      Math.ceil(totals.totalAmount / (Number(splitPeopleCount) || members.length))
+                    )}
+                  </span>
+                </div>
               </div>
             </div>
 

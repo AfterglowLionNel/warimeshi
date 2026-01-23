@@ -1,96 +1,53 @@
-import { redirect } from "next/navigation"
-import { createClient } from "@/lib/supabase/server"
-import { TableDetailClient } from "@/components/group/table-detail-client"
-import { ArchivedTableNotice } from "@/components/group/archived-table-notice"
+import { db } from "@/lib/db";
+import { tables, tableMembers } from "@/lib/db/schema";
+import { eq, and } from "drizzle-orm";
+import { TableDetailPageClient } from "@/components/group/table-detail-page-client";
 
 export default async function TableDetailPage({
   params,
 }: {
-  params: Promise<{ token: string }>
+  params: Promise<{ token: string }>;
 }) {
-  const { token } = await params
-  const supabase = await createClient()
+  const { token } = await params;
 
-  // Get table by invite token
-  const { data: table, error: tableError } = await supabase
-    .from("tables")
-    .select("*")
-    .eq("invite_token", token)
-    .single()
+  // Get table by invite token (server-side)
+  const [table] = await db
+    .select()
+    .from(tables)
+    .where(eq(tables.inviteToken, token))
+    .limit(1);
 
-  if (tableError || !table) {
-    redirect("/group?error=table_not_found")
+  if (!table) {
+    return <TableDetailPageClient table={null} token={token} error="table_not_found" />;
   }
 
-  // Check if user is logged in
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  // Get owner info
+  const [ownerMember] = await db
+    .select({ displayName: tableMembers.displayName })
+    .from(tableMembers)
+    .where(and(eq(tableMembers.tableId, table.id), eq(tableMembers.isMaster, true)))
+    .limit(1);
 
-  if (!user) {
-    redirect(`/auth/login?redirect=/group/table/${token}`)
-  }
-
-  // Get user's DB record
-  const { data: dbUser } = await supabase.from("users").select("*").eq("firebase_uid", user.id).single()
-
-  if (!dbUser) {
-    redirect("/auth/error?error=user_not_found")
-  }
-
-  // Archived tables are only accessible by the owner
-  if (table.is_archived && table.owner_user_id !== dbUser.id) {
-    const { data: ownerMember } = await supabase
-      .from("table_members")
-      .select("display_name")
-      .eq("table_id", table.id)
-      .eq("is_master", true)
-      .limit(1)
-      .single()
-
-    return (
-      <ArchivedTableNotice
-        tableName={table.name}
-        eventDate={table.event_date}
-        ownerName={ownerMember?.display_name || "作成者"}
-      />
-    )
-  }
-
-  // Check if user is a member
-  const { data: membership } = await supabase
-    .from("table_members")
-    .select("*")
-    .eq("table_id", table.id)
-    .eq("user_id", dbUser.id)
-    .single()
-
-  if (!membership) {
-    redirect(`/group/join/${token}`)
-  }
-
-  // Get all members
-  const { data: members } = await supabase
-    .from("table_members")
-    .select("*, user:users(*)")
-    .eq("table_id", table.id)
-    .order("joined_at", { ascending: true })
-
-  // Get orders (non-deleted)
-  const { data: orders } = await supabase
-    .from("orders")
-    .select("*, member:table_members(*)")
-    .eq("table_id", table.id)
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false })
+  // Convert table to expected format
+  const tableForComponent = {
+    id: table.id,
+    owner_user_id: table.ownerUserId,
+    name: table.name,
+    event_date: table.eventDate.toISOString().split("T")[0],
+    invite_token: table.inviteToken,
+    is_archived: table.isArchived,
+    archived_at: table.archivedAt?.toISOString() ?? null,
+    is_locked: table.isLocked,
+    auto_lock_at: table.autoLockAt?.toISOString() ?? null,
+    created_at: table.createdAt.toISOString(),
+    updated_at: table.updatedAt.toISOString(),
+  };
 
   return (
-    <TableDetailClient
-      table={table}
-      currentUser={dbUser}
-      currentMembership={membership}
-      initialMembers={members || []}
-      initialOrders={orders || []}
+    <TableDetailPageClient
+      table={tableForComponent}
+      token={token}
+      ownerName={ownerMember?.displayName || "作成者"}
     />
-  )
+  );
 }

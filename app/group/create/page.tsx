@@ -1,77 +1,118 @@
-"use client"
+"use client";
 
-import type React from "react"
-
-import { useEffect, useState } from "react"
-import Link from "next/link"
-import { useRouter } from "next/navigation"
-import { generateInviteToken } from "@/lib/utils/format"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { ArrowLeft, Loader2 } from "lucide-react"
-import { toast } from "sonner"
+import type React from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { generateInviteToken } from "@/lib/utils/format";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { ArrowLeft, Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import { getGuestToken, hasGuestSession, setGuestSession } from "@/lib/guest/guest-session";
 
 export default function CreateTablePage() {
-  const [tableName, setTableName] = useState("")
-  const [eventDate, setEventDate] = useState(new Date().toISOString().split("T")[0])
-  const [displayName, setDisplayName] = useState("")
-  const [isLoading, setIsLoading] = useState(false)
-  const router = useRouter()
+  const [tableName, setTableName] = useState("");
+  const [eventDate, setEventDate] = useState(new Date().toISOString().split("T")[0]);
+  const [displayName, setDisplayName] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [isGuest, setIsGuest] = useState(false);
+  const router = useRouter();
 
-  // Prefill display name from saved profile / auth metadata
   useEffect(() => {
     const loadDefaultName = async () => {
-      const res = await fetch("/api/users/profile")
-      if (!res.ok) return
-      const json = (await res.json()) as { nickname?: string | null; email?: string | null; userMetadata?: any }
-      const fallback =
-        json.userMetadata?.nickname || json.userMetadata?.name || (json.email ? json.email.split("@")[0] : "") || ""
-      const suggested = json.nickname || fallback
-      setDisplayName((prev) => prev || suggested || "")
-    }
+      const guestToken = getGuestToken();
 
-    void loadDefaultName()
-  }, [])
+      if (guestToken) {
+        setIsGuest(true);
+        const res = await fetch(`/api/auth/guest?token=${encodeURIComponent(guestToken)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setDisplayName((prev) => prev || data.nickname || "");
+        }
+        return;
+      }
+
+      const res = await fetch("/api/users/profile");
+      if (!res.ok) return;
+      const json = (await res.json()) as { nickname?: string | null; email?: string | null; userMetadata?: any };
+      const fallback =
+        json.userMetadata?.nickname || json.userMetadata?.name || (json.email ? json.email.split("@")[0] : "") || "";
+      const suggested = json.nickname || fallback;
+      setDisplayName((prev) => prev || suggested || "");
+    };
+
+    void loadDefaultName();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+    e.preventDefault();
     if (!tableName.trim() || !eventDate || !displayName.trim()) {
-      toast.error("全ての項目を入力してください")
-      return
+      toast.error("全ての項目を入力してください");
+      return;
     }
 
-    setIsLoading(true)
+    setIsLoading(true);
 
     try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      let guestToken = getGuestToken();
+
+      if (!guestToken && !hasGuestSession()) {
+        const checkSession = await fetch("/api/users/profile");
+        if (!checkSession.ok) {
+          const guestRes = await fetch("/api/auth/guest", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ displayName: displayName.trim() }),
+          });
+
+          if (!guestRes.ok) {
+            toast.error("セッションの作成に失敗しました");
+            setIsLoading(false);
+            return;
+          }
+
+          const guestData = await guestRes.json();
+          setGuestSession(guestData.guestToken, guestData.userId);
+          guestToken = guestData.guestToken;
+          setIsGuest(true);
+        }
+      }
+
+      if (guestToken) {
+        headers["X-Guest-Token"] = guestToken;
+      }
+
       const res = await fetch("/api/tables", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ tableName, eventDate, displayName }),
-      })
+      });
 
       if (res.status === 401) {
-        router.push("/auth/login?redirect=/group/create")
-        return
+        router.push("/auth/login?redirect=/group/create");
+        return;
       }
 
       if (!res.ok) {
-        throw new Error("Failed to create table")
+        throw new Error("Failed to create table");
       }
 
-      const { inviteToken } = (await res.json()) as { inviteToken: string }
-      const fallbackToken = inviteToken || generateInviteToken()
+      const { inviteToken } = (await res.json()) as { inviteToken: string };
+      const fallbackToken = inviteToken || generateInviteToken();
 
-      toast.success("テーブルを作成しました")
-      router.push(`/group/table/${fallbackToken}`)
+      toast.success("テーブルを作成しました");
+      router.push(`/group/table/${fallbackToken}`);
     } catch (error) {
-      console.error("Error creating table:", error)
-      toast.error("テーブルの作成に失敗しました")
+      console.error("Error creating table:", error);
+      toast.error("テーブルの作成に失敗しました");
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   return (
     <main className="min-h-screen flex flex-col">
@@ -146,5 +187,5 @@ export default function CreateTablePage() {
         </Card>
       </div>
     </main>
-  )
+  );
 }

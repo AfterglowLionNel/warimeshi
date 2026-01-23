@@ -15,11 +15,11 @@ export default async function AuthErrorPage({
       <div className="w-full max-w-sm">
         <div className="flex flex-col gap-6">
           <Link
-            href="/"
+            href="/group"
             className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />
-            トップに戻る
+            ダッシュボードに戻る
           </Link>
 
           <Card>
@@ -40,7 +40,7 @@ export default async function AuthErrorPage({
                   <Link href="/auth/login">ログインに戻る</Link>
                 </Button>
                 <Button asChild variant="outline" className="w-full bg-transparent">
-                  <Link href="/">トップページへ</Link>
+                  <Link href="/group">ダッシュボードへ</Link>
                 </Button>
               </div>
             </CardContent>

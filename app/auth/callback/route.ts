@@ -1,41 +1,21 @@
-import { createClient } from "@/lib/supabase/server"
-import { NextResponse } from "next/server"
+import { NextResponse } from "next/server";
 
+// This route is deprecated - Auth.js handles OAuth callbacks at /api/auth/callback/[provider]
+// Keep for backwards compatibility to redirect old URLs
 export async function GET(request: Request) {
-  const requestUrl = new URL(request.url)
-  const searchParams = requestUrl.searchParams
-  const code = searchParams.get("code")
-  const next = searchParams.get("next") ?? "/group"
-  const redirectPath = next.startsWith("/") ? next : "/group"
+  const requestUrl = new URL(request.url);
+  const code = requestUrl.searchParams.get("code");
+  const state = requestUrl.searchParams.get("state");
+  const next = requestUrl.searchParams.get("next") ?? "/group";
 
-  const envOrigin = process.env.NEXT_PUBLIC_SITE_URL
-  const forwardedProto = request.headers.get("x-forwarded-proto")
-  const forwardedHost = request.headers.get("x-forwarded-host")
-  const rawHost = request.headers.get("host")
-  const proto = forwardedProto ? `${forwardedProto}:` : requestUrl.protocol
-
-  const candidates = [
-    envOrigin,
-    forwardedHost ? `${proto}//${forwardedHost}` : null,
-    rawHost ? `${proto}//${rawHost}` : null,
-    requestUrl.origin,
-  ]
-  const origin =
-    candidates.find((v) => v && !v.includes("localhost") && !v.includes("0.0.0.0")) ??
-    candidates.find(Boolean) ??
-    requestUrl.origin
-
-  const redirectResponse = NextResponse.redirect(`${origin}${redirectPath}`)
-
-  if (code) {
-    const supabase = await createClient(redirectResponse)
-    const { error } = await supabase.auth.exchangeCodeForSession(code)
-
-    if (!error) {
-      return redirectResponse
-    }
+  // If there's OAuth params, redirect to Auth.js callback
+  if (code || state) {
+    const baseUrl = process.env.AUTH_URL || process.env.NEXT_PUBLIC_SITE_URL || requestUrl.origin;
+    const params = new URLSearchParams(requestUrl.searchParams);
+    return NextResponse.redirect(`${baseUrl}/api/auth/callback/google?${params.toString()}`);
   }
 
-  // Return to error page on failure
-  return NextResponse.redirect(`${origin}/auth/error?error=callback_failed`)
+  // Otherwise redirect to the next page or home
+  const baseUrl = process.env.AUTH_URL || process.env.NEXT_PUBLIC_SITE_URL || requestUrl.origin;
+  return NextResponse.redirect(`${baseUrl}${next}`);
 }

@@ -1,0 +1,127 @@
+import { NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { users, tables, tableMembers, orders } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+
+export async function POST(request: Request) {
+  const session = await auth();
+
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized - must be logged in" }, { status: 401 });
+  }
+
+  const body = await request.json().catch(() => null);
+  const guestToken = body?.guestToken as string | undefined;
+
+  if (!guestToken) {
+    return NextResponse.json({ error: "guestToken is required" }, { status: 400 });
+  }
+
+  // Find the authenticated user in DB
+  let [authenticatedUser] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.id, session.user.id))
+    .limit(1);
+
+  if (!authenticatedUser && session.user.email) {
+    [authenticatedUser] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, session.user.email))
+      .limit(1);
+  }
+
+  if (!authenticatedUser) {
+    return NextResponse.json({ error: "Authenticated user not found" }, { status: 400 });
+  }
+
+  // Find the guest user by token
+  const [guestUser] = await db
+    .select({
+      id: users.id,
+      isGuestUser: users.isGuestUser,
+      guestTokenExpiresAt: users.guestTokenExpiresAt,
+    })
+    .from(users)
+    .where(eq(users.guestToken, guestToken))
+    .limit(1);
+
+  if (!guestUser) {
+    return NextResponse.json({ error: "Guest user not found" }, { status: 404 });
+  }
+
+  if (!guestUser.isGuestUser) {
+    return NextResponse.json({ error: "Token does not belong to a guest user" }, { status: 400 });
+  }
+
+  if (guestUser.guestTokenExpiresAt && new Date(guestUser.guestTokenExpiresAt) < new Date()) {
+    return NextResponse.json({ error: "Guest token has expired" }, { status: 401 });
+  }
+
+  // If it's the same user, just clear the guest status
+  if (guestUser.id === authenticatedUser.id) {
+    await db
+      .update(users)
+      .set({
+        isGuestUser: false,
+        guestToken: null,
+        guestTokenExpiresAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, guestUser.id));
+
+    return NextResponse.json({
+      success: true,
+      message: "Guest status cleared",
+      migratedTables: 0,
+      migratedMemberships: 0,
+      migratedOrders: 0,
+    });
+  }
+
+  try {
+    // Migrate all data from guest user to authenticated user
+    // 1. Update tables owned by guest user
+    const updatedTables = await db
+      .update(tables)
+      .set({ ownerUserId: authenticatedUser.id, updatedAt: new Date() })
+      .where(eq(tables.ownerUserId, guestUser.id))
+      .returning({ id: tables.id });
+
+    // 2. Update table memberships
+    const updatedMemberships = await db
+      .update(tableMembers)
+      .set({ userId: authenticatedUser.id })
+      .where(eq(tableMembers.userId, guestUser.id))
+      .returning({ id: tableMembers.id });
+
+    // 3. Update addedByUserId references
+    await db
+      .update(tableMembers)
+      .set({ addedByUserId: authenticatedUser.id })
+      .where(eq(tableMembers.addedByUserId, guestUser.id));
+
+    // 4. Update orders created by guest user
+    const updatedOrders = await db
+      .update(orders)
+      .set({ createdByUserId: authenticatedUser.id, updatedAt: new Date() })
+      .where(eq(orders.createdByUserId, guestUser.id))
+      .returning({ id: orders.id });
+
+    // 5. Delete the guest user record
+    await db.delete(users).where(eq(users.id, guestUser.id));
+
+    return NextResponse.json({
+      success: true,
+      message: "Guest data successfully linked to your account",
+      migratedTables: updatedTables.length,
+      migratedMemberships: updatedMemberships.length,
+      migratedOrders: updatedOrders.length,
+    });
+  } catch (error) {
+    console.error("Link guest error:", error);
+    return NextResponse.json({ error: "Failed to link guest account" }, { status: 500 });
+  }
+}

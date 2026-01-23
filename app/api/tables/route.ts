@@ -1,63 +1,150 @@
-import { NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
-import { generateInviteToken } from "@/lib/utils/format"
+import { NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { users, tables, tableMembers } from "@/lib/db/schema";
+import { eq, inArray, desc } from "drizzle-orm";
+import { generateInviteToken } from "@/lib/utils/format";
+import { resolveUserIdFromGuestToken } from "@/lib/auth/permissions";
+
+async function resolveUserId(request: Request): Promise<{ userId: string | null; isGuest: boolean }> {
+  const session = await auth();
+
+  if (session?.user?.id) {
+    let [dbUser] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.id, session.user.id))
+      .limit(1);
+
+    if (!dbUser && session.user.email) {
+      [dbUser] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.email, session.user.email))
+        .limit(1);
+    }
+
+    if (dbUser) {
+      return { userId: dbUser.id, isGuest: false };
+    }
+  }
+
+  const guestToken = request.headers.get("X-Guest-Token");
+  if (guestToken) {
+    const guestUserId = await resolveUserIdFromGuestToken(guestToken);
+    if (guestUserId) {
+      return { userId: guestUserId, isGuest: true };
+    }
+  }
+
+  return { userId: null, isGuest: false };
+}
 
 export async function POST(request: Request) {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const { userId, isGuest } = await resolveUserId(request);
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await request.json().catch(() => null)
-  const tableName = body?.tableName as string | undefined
-  const eventDate = body?.eventDate as string | undefined
-  const displayName = body?.displayName as string | undefined
+  const body = await request.json().catch(() => null);
+  const tableName = body?.tableName as string | undefined;
+  const eventDate = body?.eventDate as string | undefined;
+  const displayName = body?.displayName as string | undefined;
 
   if (!tableName || !eventDate || !displayName) {
-    return NextResponse.json({ error: "Invalid payload" }, { status: 400 })
+    return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
   }
 
-  const { data: dbUser, error: userError } = await supabase
-    .from("users")
-    .select("id")
-    .eq("firebase_uid", user.id)
-    .single()
+  const inviteToken = generateInviteToken();
+  const autoLockAt = new Date(Date.now() + 12 * 60 * 60 * 1000);
 
-  if (userError || !dbUser) {
-    return NextResponse.json({ error: "ユーザー情報の取得に失敗しました" }, { status: 400 })
+  try {
+    const [newTable] = await db
+      .insert(tables)
+      .values({
+        ownerUserId: userId,
+        name: tableName.trim(),
+        eventDate: new Date(eventDate),
+        inviteToken,
+        autoLockAt,
+      })
+      .returning();
+
+    if (!newTable) {
+      return NextResponse.json({ error: "Failed to create table" }, { status: 400 });
+    }
+
+    await db.insert(tableMembers).values({
+      tableId: newTable.id,
+      userId: userId,
+      displayName: displayName.trim(),
+      isMaster: true,
+      isGuest: isGuest,
+    });
+
+    return NextResponse.json({ success: true, inviteToken });
+  } catch (error) {
+    console.error("Table creation error:", error);
+    return NextResponse.json({ error: "Failed to create table" }, { status: 400 });
+  }
+}
+
+export async function GET(request: Request) {
+  const { userId } = await resolveUserId(request);
+
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const inviteToken = generateInviteToken()
+  try {
+    const memberships = await db
+      .select({
+        tableId: tableMembers.tableId,
+        isMaster: tableMembers.isMaster,
+      })
+      .from(tableMembers)
+      .where(eq(tableMembers.userId, userId));
 
-  const { data: newTable, error: tableError } = await supabase
-    .from("tables")
-    .insert({
-      owner_user_id: dbUser.id,
-      name: tableName.trim(),
-      event_date: eventDate,
-      invite_token: inviteToken,
-    })
-    .select()
-    .single()
+    const tableIds = memberships.map((m) => m.tableId);
 
-  if (tableError || !newTable) {
-    return NextResponse.json({ error: tableError?.message || "Failed to create table" }, { status: 400 })
+    if (tableIds.length === 0) {
+      return NextResponse.json({ tables: [] });
+    }
+
+    const tablesData = await db
+      .select()
+      .from(tables)
+      .where(inArray(tables.id, tableIds))
+      .orderBy(desc(tables.eventDate));
+
+    const memberCounts = await Promise.all(
+      tablesData.map(async (table) => {
+        const members = await db
+          .select({ id: tableMembers.id })
+          .from(tableMembers)
+          .where(eq(tableMembers.tableId, table.id));
+        return { tableId: table.id, count: members.length };
+      })
+    );
+
+    const tablesWithDetails = tablesData.map((table) => {
+      const membership = memberships.find((m) => m.tableId === table.id);
+      const countData = memberCounts.find((c) => c.tableId === table.id);
+      return {
+        id: table.id,
+        name: table.name,
+        event_date: table.eventDate.toISOString().split("T")[0],
+        invite_token: table.inviteToken,
+        is_archived: table.isArchived,
+        is_master: membership?.isMaster || false,
+        member_count: countData?.count || 0,
+      };
+    });
+
+    return NextResponse.json({ tables: tablesWithDetails });
+  } catch (error) {
+    console.error("Tables fetch error:", error);
+    return NextResponse.json({ error: "Failed to fetch tables" }, { status: 500 });
   }
-
-  const { error: memberError } = await supabase.from("table_members").insert({
-    table_id: newTable.id,
-    user_id: dbUser.id,
-    display_name: displayName.trim(),
-    is_master: true,
-  })
-
-  if (memberError) {
-    return NextResponse.json({ error: memberError.message }, { status: 400 })
-  }
-
-  return NextResponse.json({ success: true, inviteToken })
 }

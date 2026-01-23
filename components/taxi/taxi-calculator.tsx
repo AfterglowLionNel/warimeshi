@@ -11,7 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
-import { Calculator, Car, Plus, Trash2, Truck, Users } from "lucide-react"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Calculator, Car, ChevronDown, Plus, Trash2, Truck, Users } from "lucide-react"
 import { toast } from "sonner"
 
 interface TaxiCalculatorProps {
@@ -69,6 +70,8 @@ export function TaxiCalculator({
   const [samePersonCount, setSamePersonCount] = useState("1")
   const [segments, setSegments] = useState<Segment[]>([{ id: "1", name: "", distanceKm: 0 }])
   const [isSaving, setIsSaving] = useState(false)
+  const [showLongDistanceSettings, setShowLongDistanceSettings] = useState(vehicleType === "daiko")
+  const [expandedSegments, setExpandedSegments] = useState<Set<string>>(new Set())
   const lastSavedHash = useRef<string | null>(null)
   const lastRemoteCreatedAt = useRef<string | null>(null)
 
@@ -146,20 +149,19 @@ export function TaxiCalculator({
     [settings.baseKm, settings.basePrice, settings.perKmPrice, settings.pickupFee].some(
       (v) => v === undefined || Number.isNaN(v) || v < 0,
     ) ||
-    (vehicleType === "daiko" &&
-      (settings.extraFromKm === undefined ||
-        Number.isNaN(settings.extraFromKm) ||
-        settings.extraFromKm < 0 ||
-        settings.extraPerKm === undefined ||
-        Number.isNaN(settings.extraPerKm) ||
-        settings.extraPerKm < 0))
+    // If long distance settings are partially filled, they must be valid
+    ((settings.extraFromKm !== undefined && !Number.isNaN(settings.extraFromKm) && settings.extraFromKm > 0) &&
+      (settings.extraPerKm === undefined || Number.isNaN(settings.extraPerKm) || settings.extraPerKm < 0)) ||
+    ((settings.extraPerKm !== undefined && !Number.isNaN(settings.extraPerKm) && settings.extraPerKm > 0) &&
+      (settings.extraFromKm === undefined || Number.isNaN(settings.extraFromKm) || settings.extraFromKm < 0))
 
   const calculateBaseFare = (distanceKm: number) => {
     if (distanceKm <= 0) return 0
     let fare = (settings.basePrice || 0) + (settings.pickupFee || 0)
     if (distanceKm > (settings.baseKm || 0)) {
       const remainingKm = distanceKm - (settings.baseKm || 0)
-      if (vehicleType === "daiko" && settings.extraFromKm && settings.extraPerKm && distanceKm > settings.extraFromKm) {
+      // Apply long-distance tier if settings exist (unified for both taxi and daiko)
+      if (settings.extraFromKm && settings.extraPerKm && distanceKm > settings.extraFromKm) {
         const normalKm = settings.extraFromKm - (settings.baseKm || 0)
         const extraKm = distanceKm - settings.extraFromKm
         fare += normalKm * (settings.perKmPrice || 0) + extraKm * ((settings.perKmPrice || 0) + settings.extraPerKm)
@@ -341,15 +343,24 @@ export function TaxiCalculator({
                     onChange={(e) => updateSetting("pickupFee", e.target.value, Number.parseInt)}
                   />
                 </div>
+              </div>
 
-                {vehicleType === "daiko" && (
-                  <>
+              <Collapsible open={showLongDistanceSettings} onOpenChange={setShowLongDistanceSettings}>
+                <CollapsibleTrigger asChild>
+                  <Button variant="ghost" size="sm" className="w-full justify-between">
+                    長距離割増設定
+                    <ChevronDown className={`h-4 w-4 transition-transform ${showLongDistanceSettings ? "rotate-180" : ""}`} />
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-2">
+                  <div className="grid grid-cols-2 gap-3 p-3 bg-muted/50 rounded-lg">
                     <div>
                       <Label className="text-sm">長距離閾値 (km)</Label>
                       <Input
                         type="number"
                         step="0.1"
                         min="0"
+                        placeholder={vehicleType === "daiko" ? "10" : "未設定"}
                         value={Number.isNaN(settings.extraFromKm ?? Number.NaN) ? "" : settings.extraFromKm}
                         onChange={(e) => updateSetting("extraFromKm", e.target.value, Number.parseFloat)}
                       />
@@ -359,13 +370,17 @@ export function TaxiCalculator({
                       <Input
                         type="number"
                         min="0"
+                        placeholder={vehicleType === "daiko" ? "100" : "未設定"}
                         value={Number.isNaN(settings.extraPerKm ?? Number.NaN) ? "" : settings.extraPerKm}
                         onChange={(e) => updateSetting("extraPerKm", e.target.value, Number.parseInt)}
                       />
                     </div>
-                  </>
-                )}
-              </div>
+                    <p className="col-span-2 text-xs text-muted-foreground">
+                      設定した距離を超えると、追加単価が加算単価に上乗せされます
+                    </p>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
               {settingsInvalid && <p className="text-sm text-destructive">0以上の値をすべて入力してください。</p>}
             </CardContent>
           </Card>
@@ -500,9 +515,17 @@ export function TaxiCalculator({
             </TabsContent>
 
             <TabsContent value="segments" className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                出発から降車順に区間距離を入力してください。各区間の料金を、その区間に乗っている人数で割ります。
-              </p>
+              <div className="p-3 bg-muted/50 rounded-lg space-y-2">
+                <p className="text-sm font-medium">入力方法</p>
+                <p className="text-sm text-muted-foreground">
+                  出発地点から降車順に、各区間の距離を入力してください。
+                </p>
+                <div className="text-xs text-muted-foreground bg-background/50 p-2 rounded">
+                  <p className="font-medium mb-1">例: AさんがBさんより先に降りる場合</p>
+                  <p>「Aさん降車まで: 3km」→「Bさん降車まで: 2km」の順に入力</p>
+                  <p className="mt-1">料金は各区間を乗車していた人数で割り勘されます。</p>
+                </div>
+              </div>
               <div className="space-y-2">
                 {segments.map((seg, index) => (
                   <div key={seg.id} className="flex items-center gap-2">
@@ -580,23 +603,65 @@ export function TaxiCalculator({
                     <h4 className="font-medium">区間ごとの内訳</h4>
                     <span className="text-xs text-muted-foreground">1kmあたり {formatCurrency(Math.round(results.pricePerKm))}</span>
                   </div>
+                  <p className="text-xs text-muted-foreground mb-2">タップで計算式を表示</p>
                   <div className="space-y-2">
-                    {results.segments.map((seg, index) => (
-                      <div key={seg.id} className="p-2 bg-muted/50 rounded">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <span className="font-medium">{seg.name || `区間 ${index + 1}`}</span>
-                            <span className="text-xs text-muted-foreground ml-2">({seg.distanceKm.toFixed(1)} km)</span>
+                    {results.segments.map((seg, index) => {
+                      const isExpanded = expandedSegments.has(seg.id)
+                      const toggleExpand = () => {
+                        setExpandedSegments(prev => {
+                          const next = new Set(prev)
+                          if (next.has(seg.id)) {
+                            next.delete(seg.id)
+                          } else {
+                            next.add(seg.id)
+                          }
+                          return next
+                        })
+                      }
+                      return (
+                        <div
+                          key={seg.id}
+                          className="p-2 bg-muted/50 rounded cursor-pointer hover:bg-muted/70 transition-colors"
+                          onClick={toggleExpand}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <span className="font-medium">{seg.name || `区間 ${index + 1}`}</span>
+                              <span className="text-xs text-muted-foreground ml-2">({seg.distanceKm.toFixed(1)} km)</span>
+                            </div>
+                            <span className="font-bold text-primary">
+                              {formatCurrency(results.passengers[index]?.amount ?? 0)}
+                            </span>
                           </div>
-                          <span className="font-bold text-primary">
-                            {formatCurrency(results.passengers[index]?.amount ?? 0)}
-                          </span>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            区間料金 {formatCurrency(seg.segmentFare)} / {seg.riderCount}人乗車 / 1人あたり{formatCurrency(seg.perPersonShare)}
+                          </p>
+                          {isExpanded && (
+                            <div className="mt-2 p-2 bg-background rounded text-xs space-y-1 border">
+                              <p className="font-medium text-foreground">計算式:</p>
+                              <p className="text-muted-foreground">
+                                区間料金 = 距離 × km単価
+                              </p>
+                              <p className="font-mono text-foreground">
+                                = {seg.distanceKm.toFixed(1)} km × {formatCurrency(Math.round(results.pricePerKm))}/km = {formatCurrency(seg.segmentFare)}
+                              </p>
+                              <p className="text-muted-foreground mt-1">
+                                1人あたり = 区間料金 ÷ 乗車人数
+                              </p>
+                              <p className="font-mono text-foreground">
+                                = {formatCurrency(seg.segmentFare)} ÷ {seg.riderCount}人 = {formatCurrency(seg.perPersonShare)}
+                              </p>
+                              <p className="text-muted-foreground mt-1 pt-1 border-t">
+                                この区間で降りる人の支払い総額:
+                              </p>
+                              <p className="font-mono text-foreground">
+                                = ここまでの累積 = {formatCurrency(results.passengers[index]?.amount ?? 0)}
+                              </p>
+                            </div>
+                          )}
                         </div>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          区間料金 {formatCurrency(seg.segmentFare)} / {seg.riderCount}人乗車 / 1人あたり{formatCurrency(seg.perPersonShare)}
-                        </p>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </div>
               </div>

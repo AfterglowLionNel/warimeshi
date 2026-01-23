@@ -1,133 +1,183 @@
-import { NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import { NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { users, orders, tables, tableMembers } from "@/lib/db/schema";
+import { eq, and, isNull } from "drizzle-orm";
+import { resolveUserIdFromGuestToken } from "@/lib/auth/permissions";
 
-type OrderUpdate = {
-  member_id?: string
-  item_name?: string | null
-  unit_price?: number
-  quantity?: number
-  line_total?: number
+async function resolveUserId(request: Request): Promise<string | null> {
+  const session = await auth();
+
+  if (session?.user?.id) {
+    let [dbUser] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.id, session.user.id))
+      .limit(1);
+
+    if (!dbUser && session.user.email) {
+      [dbUser] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.email, session.user.email))
+        .limit(1);
+    }
+
+    if (dbUser) {
+      return dbUser.id;
+    }
+  }
+
+  const guestToken = request.headers.get("X-Guest-Token");
+  if (guestToken) {
+    const guestUserId = await resolveUserIdFromGuestToken(guestToken);
+    if (guestUserId) {
+      return guestUserId;
+    }
+  }
+
+  return null;
 }
 
 export async function PATCH(
   request: Request,
-  context: { params: { id: string } } | { params: Promise<{ id: string }> },
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const userId = await resolveUserId(request);
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const resolvedParams = await Promise.resolve((context as any)?.params)
-  const orderId =
-    resolvedParams?.id ||
-    (() => {
-      const segments = new URL(request.url).pathname.split("/").filter(Boolean)
-      return segments[segments.length - 1]
-    })()
-  const body = await request.json().catch(() => ({}))
-  const updates = body && typeof body === "object" ? ((body as any).updates ?? body) : {}
+  const { id: orderId } = await params;
+  const body = await request.json().catch(() => ({}));
+  const updates = body && typeof body === "object" ? ((body as any).updates ?? body) : {};
 
   if (!orderId) {
-    return NextResponse.json({ error: "Invalid payload: order id is required" }, { status: 400 })
+    return NextResponse.json({ error: "Invalid payload: order id is required" }, { status: 400 });
   }
 
-  const { data: dbUser, error: userError } = await supabase
-    .from("users")
-    .select("id")
-    .eq("firebase_uid", user.id)
-    .single()
+  // Get the order
+  const [order] = await db
+    .select()
+    .from(orders)
+    .where(and(eq(orders.id, orderId), isNull(orders.deletedAt)))
+    .limit(1);
 
-  if (userError || !dbUser) {
-    return NextResponse.json({ error: "ユーザー情報の取得に失敗しました" }, { status: 400 })
+  if (!order) {
+    return NextResponse.json({ error: "注文が見つかりませんでした" }, { status: 404 });
   }
 
-  const { data: order, error: orderError } = await supabase
-    .from("orders")
-    .select("id, table_id, member_id, created_by_user_id, unit_price, quantity, deleted_at")
-    .eq("id", orderId)
-    .maybeSingle()
+  // Get table and check permissions
+  const [[table], [member]] = await Promise.all([
+    db
+      .select({ id: tables.id, ownerUserId: tables.ownerUserId, isArchived: tables.isArchived })
+      .from(tables)
+      .where(eq(tables.id, order.tableId))
+      .limit(1),
+    db
+      .select({ id: tableMembers.id, userId: tableMembers.userId })
+      .from(tableMembers)
+      .where(eq(tableMembers.id, order.memberId))
+      .limit(1),
+  ]);
 
-  if (orderError || !order || order.deleted_at) {
-    return NextResponse.json({ error: "注文が見つかりませんでした" }, { status: 404 })
+  if (table?.isArchived && table.ownerUserId !== userId) {
+    return NextResponse.json({ error: "このテーブルはアーカイブされています" }, { status: 403 });
   }
 
-  const [{ data: table }, { data: member }] = await Promise.all([
-    supabase.from("tables").select("id, owner_user_id, is_archived").eq("id", order.table_id).maybeSingle(),
-    supabase.from("table_members").select("id, user_id").eq("id", order.member_id).maybeSingle(),
-  ])
-
-  if (table?.is_archived && table.owner_user_id !== dbUser.id) {
-    return NextResponse.json({ error: "このテーブルはアーカイブされています" }, { status: 403 })
-  }
-
-  const isOwner = table?.owner_user_id === dbUser.id
-  const isCreator = order.created_by_user_id === dbUser.id
-  const isOrderMember = member?.user_id === dbUser.id
+  const isOwner = table?.ownerUserId === userId;
+  const isCreator = order.createdByUserId === userId;
+  const isOrderMember = member?.userId === userId;
 
   if (!isOwner && !isCreator && !isOrderMember) {
-    return NextResponse.json({ error: "注文を編集する権限がありません" }, { status: 403 })
+    return NextResponse.json({ error: "注文を編集する権限がありません" }, { status: 403 });
   }
 
-  const unitPrice = updates.unit_price !== undefined ? Number(updates.unit_price) : order.unit_price
-  const quantity = updates.quantity !== undefined ? Number(updates.quantity) : order.quantity
+  const unitPrice = updates.unit_price !== undefined ? Number(updates.unit_price) : order.unitPrice;
+  const quantity = updates.quantity !== undefined ? Number(updates.quantity) : order.quantity;
 
   if (Number.isNaN(unitPrice) || unitPrice < 0) {
-    return NextResponse.json({ error: "金額が不正です" }, { status: 400 })
+    return NextResponse.json({ error: "金額が不正です" }, { status: 400 });
   }
 
   if (Number.isNaN(quantity) || quantity < 1) {
-    return NextResponse.json({ error: "数量が不正です" }, { status: 400 })
+    return NextResponse.json({ error: "数量が不正です" }, { status: 400 });
   }
 
-  const payload: OrderUpdate = {
-    member_id: updates.member_id ?? order.member_id,
-    item_name: updates.item_name ?? order.item_name ?? null,
-    unit_price: unitPrice,
-    quantity,
-    line_total: unitPrice * quantity,
+  try {
+    await db
+      .update(orders)
+      .set({
+        memberId: updates.member_id ?? order.memberId,
+        itemName: updates.item_name ?? order.itemName ?? null,
+        unitPrice,
+        quantity,
+        lineTotal: unitPrice * quantity,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(orders.id, orderId), isNull(orders.deletedAt)));
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Order update error:", error);
+    return NextResponse.json({ error: "Failed to update order" }, { status: 400 });
   }
-
-  const { error } = await supabase
-    .from("orders")
-    .update(payload)
-    .eq("id", orderId)
-    .is("deleted_at", null)
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 400 })
-  }
-
-  return NextResponse.json({ success: true })
 }
 
-export async function DELETE(_request: Request, { params }: { params: { id: string } }) {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const userId = await resolveUserId(request);
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const orderId = params.id
+  const { id: orderId } = await params;
   if (!orderId) {
-    return NextResponse.json({ error: "Order id is required" }, { status: 400 })
+    return NextResponse.json({ error: "Order id is required" }, { status: 400 });
   }
 
-  const { error } = await supabase
-    .from("orders")
-    .update({ deleted_at: new Date().toISOString() })
-    .eq("id", orderId)
+  // Get the order to check permissions
+  const [order] = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 400 })
+  if (!order) {
+    return NextResponse.json({ error: "注文が見つかりませんでした" }, { status: 404 });
   }
 
-  return NextResponse.json({ success: true })
+  // Get table ownership
+  const [table] = await db
+    .select({ ownerUserId: tables.ownerUserId })
+    .from(tables)
+    .where(eq(tables.id, order.tableId))
+    .limit(1);
+
+  const isOwner = table?.ownerUserId === userId;
+  const isCreator = order.createdByUserId === userId;
+
+  const [member] = await db
+    .select({ userId: tableMembers.userId })
+    .from(tableMembers)
+    .where(eq(tableMembers.id, order.memberId))
+    .limit(1);
+
+  const isOrderMember = member?.userId === userId;
+
+  if (!isOwner && !isCreator && !isOrderMember) {
+    return NextResponse.json({ error: "注文を削除する権限がありません" }, { status: 403 });
+  }
+
+  try {
+    await db
+      .update(orders)
+      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .where(eq(orders.id, orderId));
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Order deletion error:", error);
+    return NextResponse.json({ error: "Failed to delete order" }, { status: 400 });
+  }
 }

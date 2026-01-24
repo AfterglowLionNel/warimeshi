@@ -49,6 +49,7 @@ type PassengerShare = {
   id: string
   name: string
   amount: number
+  count: number  // この地点で降りる人数
 }
 
 export function TaxiCalculator({
@@ -68,7 +69,7 @@ export function TaxiCalculator({
   const [mode, setMode] = useState<CalculationMode>("same")
   const [sameDistance, setSameDistance] = useState("")
   const [samePersonCount, setSamePersonCount] = useState("1")
-  const [segments, setSegments] = useState<Segment[]>([{ id: "1", name: "", distanceKm: 0 }])
+  const [segments, setSegments] = useState<Segment[]>([{ id: "1", name: "", distanceKm: 0, dropCount: 1 }])
   const [isSaving, setIsSaving] = useState(false)
   const [showLongDistanceSettings, setShowLongDistanceSettings] = useState(vehicleType === "daiko")
   const [expandedSegments, setExpandedSegments] = useState<Set<string>>(new Set())
@@ -88,7 +89,9 @@ export function TaxiCalculator({
       const input = data.input as any
       setSameDistance(input.sameDistance ?? "")
       setSamePersonCount(input.samePersonCount ?? "1")
-      setSegments(input.segments ?? [{ id: "1", name: "", distanceKm: 0 }])
+      // 後方互換: dropCountがないセグメントにはデフォルト1を設定
+      const savedSegments = (input.segments ?? [{ id: "1", name: "", distanceKm: 0, dropCount: 1 }]) as Segment[]
+      setSegments(savedSegments.map((s: Segment) => ({ ...s, dropCount: s.dropCount ?? 1 })))
       setMode(input.mode ?? "same")
     }
     if (data.created_at) {
@@ -140,20 +143,28 @@ export function TaxiCalculator({
     setModifiers((prev) => prev.map((m) => (m.id === id ? { ...m, ...updates } : m)))
   const removeModifier = (id: string) => setModifiers((prev) => prev.filter((m) => m.id !== id))
 
-  const addSegment = () => setSegments((prev) => [...prev, { id: Date.now().toString(), name: "", distanceKm: 0 }])
+  const addSegment = () => setSegments((prev) => [...prev, { id: Date.now().toString(), name: "", distanceKm: 0, dropCount: 1 }])
   const updateSegment = (id: string, updates: Partial<Segment>) =>
     setSegments((prev) => prev.map((s) => (s.id === id ? { ...s, ...updates } : s)))
   const removeSegment = (id: string) => segments.length > 1 && setSegments((prev) => prev.filter((s) => s.id !== id))
 
+  const hasLongDistance = (settings.extraFromKm !== undefined && !Number.isNaN(settings.extraFromKm) && settings.extraFromKm > 0) ||
+    (settings.extraPerKm !== undefined && !Number.isNaN(settings.extraPerKm) && settings.extraPerKm > 0)
+
   const settingsInvalid =
-    [settings.baseKm, settings.basePrice, settings.perKmPrice, settings.pickupFee].some(
+    // 基本パラメータ: baseKm > 0, その他 >= 0
+    (settings.baseKm === undefined || Number.isNaN(settings.baseKm) || settings.baseKm <= 0) ||
+    [settings.basePrice, settings.perKmPrice, settings.pickupFee].some(
       (v) => v === undefined || Number.isNaN(v) || v < 0,
     ) ||
-    // If long distance settings are partially filled, they must be valid
-    ((settings.extraFromKm !== undefined && !Number.isNaN(settings.extraFromKm) && settings.extraFromKm > 0) &&
-      (settings.extraPerKm === undefined || Number.isNaN(settings.extraPerKm) || settings.extraPerKm < 0)) ||
-    ((settings.extraPerKm !== undefined && !Number.isNaN(settings.extraPerKm) && settings.extraPerKm > 0) &&
-      (settings.extraFromKm === undefined || Number.isNaN(settings.extraFromKm) || settings.extraFromKm < 0))
+    // 長距離設定: 片方のみ入力は不可
+    (hasLongDistance && (
+      settings.extraFromKm === undefined || Number.isNaN(settings.extraFromKm) || settings.extraFromKm <= 0 ||
+      settings.extraPerKm === undefined || Number.isNaN(settings.extraPerKm) || settings.extraPerKm < 0
+    )) ||
+    // 長距離閾値は初乗り距離以上であること
+    (hasLongDistance && settings.extraFromKm !== undefined && !Number.isNaN(settings.extraFromKm) &&
+      settings.extraFromKm < (settings.baseKm || 0))
 
   const calculateBaseFare = (distanceKm: number) => {
     if (distanceKm <= 0) return 0
@@ -176,51 +187,85 @@ export function TaxiCalculator({
     let fare = baseFare
     for (const mod of modifiers) {
       if (!mod.enabled) continue
-      const adjustment = mod.type === "fixed" ? mod.amount : baseFare * (mod.amount / 100)
+      // %の丸めは切り捨て（1円未満切り捨て）
+      const adjustment = mod.type === "fixed" ? mod.amount : Math.floor(baseFare * (mod.amount / 100))
       fare = mod.direction === "add" ? fare + adjustment : fare - adjustment
     }
-    return Math.max(0, fare)
+    return Math.max(0, Math.round(fare))
   }
 
   const results = useMemo<
-    | { mode: "same"; totalDistance: number; totalFare: number; perPerson: number; personCount: number }
+    | { mode: "same"; totalDistance: number; totalFare: number; perPerson: number; personCount: number; remainder: number; pickupPerPerson: number }
     | {
         mode: "segments"
         totalDistance: number
         totalFare: number
         pricePerKm: number
+        pickupPerPerson: number
+        totalPassengers: number
         segments: SegmentShareResult[]
         passengers: PassengerShare[]
       }
     | null
   >(() => {
     if (settingsInvalid) return null
+
+    const pickupFee = settings.pickupFee || 0
+
     if (mode === "same") {
       const distance = Number.parseFloat(sameDistance) || 0
       const personCount = Number.parseInt(samePersonCount, 10) || 1
       if (distance <= 0 || personCount <= 0) return null
       const baseFare = calculateBaseFare(distance)
       const totalFare = applyModifiers(baseFare)
-      const perPerson = Math.round(totalFare / personCount)
-      return { mode: "same" as const, totalDistance: distance, totalFare, perPerson, personCount }
+
+      // 同距離モードでは全員同じ距離なので迎車分割も距離按分も結果は同じ
+      // 合計一致の端数配分: floor + remainder
+      const perPerson = Math.floor(totalFare / personCount)
+      const remainder = totalFare - perPerson * personCount
+      const pickupPerPerson = personCount > 0 ? Math.round(pickupFee / personCount) : 0
+      return { mode: "same" as const, totalDistance: distance, totalFare, perPerson, personCount, remainder, pickupPerPerson }
     }
+
     const validSegments = segments.filter((s) => s.distanceKm > 0)
     if (validSegments.length === 0) return null
     const totalDistance = validSegments.reduce((sum, s) => sum + s.distanceKm, 0)
     if (totalDistance <= 0) return null
 
+    // 乗車人数 = 全区間のdropCountの合計
+    const totalPassengers = validSegments.reduce((sum, s) => sum + (s.dropCount || 1), 0)
+    if (totalPassengers <= 0) return null
+
     const baseFare = calculateBaseFare(totalDistance)
     const totalFare = applyModifiers(baseFare)
-    const pricePerKm = totalFare / totalDistance
-    const passengerTotals = new Array<number>(validSegments.length).fill(0)
+
+    // 迎車料金は全員で均等分割、残りは距離按分
+    const pickupPortion = Math.min(pickupFee, totalFare)
+    const distancePortion = totalFare - pickupPortion
+    const pricePerKm = totalDistance > 0 ? distancePortion / totalDistance : 0
+
+    // 迎車料金の一人あたり（理論値）
+    const pickupPerPersonRaw = totalPassengers > 0 ? pickupPortion / totalPassengers : 0
+
+    // 各区間の乗車人数を計算（降車済み人数を累積）
+    let cumulativeDrops = 0
+    const riderCounts: number[] = validSegments.map((s) => {
+      const riders = totalPassengers - cumulativeDrops
+      cumulativeDrops += (s.dropCount || 1)
+      return riders
+    })
+
+    // 距離按分の理論値を各降車地点ごとに蓄積
+    const distanceTotalsRaw = new Array<number>(validSegments.length).fill(0)
 
     const segmentResults: SegmentShareResult[] = validSegments.map((s, idx) => {
       const segmentFareRaw = s.distanceKm * pricePerKm
-      const riderCount = validSegments.length - idx
+      const riderCount = riderCounts[idx]
       const perPersonShareRaw = riderCount > 0 ? segmentFareRaw / riderCount : 0
 
+      // この区間以降に降りる全員に距離按分を加算
       for (let i = idx; i < validSegments.length; i++) {
-        passengerTotals[i] += perPersonShareRaw
+        distanceTotalsRaw[i] += perPersonShareRaw
       }
 
       return {
@@ -231,13 +276,47 @@ export function TaxiCalculator({
       }
     })
 
+    // 各降車地点の一人あたり支払い = 距離按分 + 迎車均等分
+    const passengerTotalsRaw = distanceTotalsRaw.map(v => v + pickupPerPersonRaw)
+
+    // 合計一致の端数配分:
+    // 1. 全員 floor で円に落とす（dropCount考慮）
+    const passengerAmounts = passengerTotalsRaw.map(v => Math.floor(v))
+    // 2. 不足分を計算（各地点の人数 × 金額の合計がtotalFareに一致すべき）
+    const currentTotal = passengerAmounts.reduce((sum, v, idx) => sum + v * (validSegments[idx].dropCount || 1), 0)
+    let remainderToDistribute = totalFare - currentTotal
+    // 3. 端数（小数部分）が大きい降車地点から、dropCount分ずつ配分
+    const fractionalParts = passengerTotalsRaw
+      .map((raw, idx) => ({ idx, frac: raw - Math.floor(raw), dropCount: validSegments[idx].dropCount || 1 }))
+      .sort((a, b) => b.frac - a.frac)
+    for (const { idx, dropCount } of fractionalParts) {
+      if (remainderToDistribute <= 0) break
+      // この地点のdropCount人全員に+1円（合計でdropCount円増加）
+      if (remainderToDistribute >= dropCount) {
+        passengerAmounts[idx] += 1
+        remainderToDistribute -= dropCount
+      } else {
+        // 余りがdropCountより少ない場合は1円ずつ（表示上は同額にならないが合計一致優先）
+        passengerAmounts[idx] += 1
+        remainderToDistribute -= dropCount
+      }
+    }
+    // 残りがまだある場合（稀だが安全のため）
+    for (let i = 0; remainderToDistribute > 0 && i < passengerAmounts.length; i++) {
+      passengerAmounts[i] += 1
+      remainderToDistribute -= (validSegments[i].dropCount || 1)
+    }
+
     const passengers: PassengerShare[] = validSegments.map((s, idx) => ({
       id: s.id,
       name: s.name || `降車 ${idx + 1}`,
-      amount: Math.round(passengerTotals[idx]),
+      amount: passengerAmounts[idx],
+      count: s.dropCount || 1,
     }))
 
-    return { mode: "segments" as const, totalDistance, totalFare, pricePerKm, segments: segmentResults, passengers }
+    const pickupPerPerson = Math.round(pickupPerPersonRaw)
+
+    return { mode: "segments" as const, totalDistance, totalFare, pricePerKm, pickupPerPerson, totalPassengers, segments: segmentResults, passengers }
   }, [mode, sameDistance, samePersonCount, segments, settings, modifiers, settingsInvalid])
 
   // Auto-save to DB when results change
@@ -381,7 +460,15 @@ export function TaxiCalculator({
                   </div>
                 </CollapsibleContent>
               </Collapsible>
-              {settingsInvalid && <p className="text-sm text-destructive">0以上の値をすべて入力してください。</p>}
+              {settingsInvalid && (
+                <p className="text-sm text-destructive">
+                  {(settings.baseKm === undefined || Number.isNaN(settings.baseKm) || settings.baseKm <= 0)
+                    ? "初乗り距離は0より大きい値を入力してください。"
+                    : hasLongDistance && settings.extraFromKm !== undefined && !Number.isNaN(settings.extraFromKm) && settings.extraFromKm < (settings.baseKm || 0)
+                    ? "長距離閾値は初乗り距離以上に設定してください。"
+                    : "0以上の値をすべて入力してください。"}
+                </p>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -400,7 +487,8 @@ export function TaxiCalculator({
         <CardContent>
           {modifiers.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-4">オプションはありません</p>
-          ) : (
+          ) : (<>
+            <p className="text-xs text-muted-foreground mb-2">※ %は基本運賃（距離料金+迎車料金）に対して適用されます（切り捨て）</p>
             <div className="space-y-3">
               {modifiers.map((mod) => (
                 <div
@@ -472,7 +560,7 @@ export function TaxiCalculator({
                 </div>
               ))}
             </div>
-          )}
+          </>)}
         </CardContent>
       </Card>
 
@@ -518,12 +606,12 @@ export function TaxiCalculator({
               <div className="p-3 bg-muted/50 rounded-lg space-y-2">
                 <p className="text-sm font-medium">入力方法</p>
                 <p className="text-sm text-muted-foreground">
-                  出発地点から降車順に、各区間の距離を入力してください。
+                  降車順に、各区間の距離と降車人数を入力してください。
                 </p>
                 <div className="text-xs text-muted-foreground bg-background/50 p-2 rounded">
-                  <p className="font-medium mb-1">例: AさんがBさんより先に降りる場合</p>
-                  <p>「Aさん降車まで: 3km」→「Bさん降車まで: 2km」の順に入力</p>
-                  <p className="mt-1">料金は各区間を乗車していた人数で割り勘されます。</p>
+                  <p className="font-medium mb-1">例: A→B→Cの順に降りる（Bは2人同時）</p>
+                  <p>「A降車: 3km / 1人」→「B降車: 2km / 2人」→「C降車: 1km / 1人」</p>
+                  <p className="mt-1">距離料金は乗車中の人数で按分、迎車料金は全員で均等分割されます。</p>
                 </div>
               </div>
               <div className="space-y-2">
@@ -541,10 +629,20 @@ export function TaxiCalculator({
                       step="0.1"
                       min="0"
                       placeholder="km"
-                      className="w-24 h-9"
+                      className="w-20 h-9"
                       value={seg.distanceKm || ""}
                       onChange={(e) =>
                         updateSegment(seg.id, { distanceKm: e.target.value === "" ? 0 : Number.parseFloat(e.target.value) })
+                      }
+                    />
+                    <Input
+                      type="number"
+                      min="1"
+                      placeholder="人"
+                      className="w-16 h-9"
+                      value={seg.dropCount || 1}
+                      onChange={(e) =>
+                        updateSegment(seg.id, { dropCount: Math.max(1, Number.parseInt(e.target.value, 10) || 1) })
                       }
                     />
                     <Button
@@ -592,16 +690,35 @@ export function TaxiCalculator({
                   <p className="text-sm text-muted-foreground">{results.personCount}人で割り勘</p>
                 </div>
                 <p className="text-sm text-muted-foreground">一人あたり</p>
-                <p className="text-3xl font-bold text-primary">{formatCurrency(results.perPerson)}</p>
+                <p className="text-3xl font-bold text-primary">
+                  {formatCurrency(results.perPerson)}
+                  {results.remainder > 0 && (
+                    <span className="text-base font-normal text-muted-foreground ml-1">
+                      〜{formatCurrency(results.perPerson + 1)}
+                    </span>
+                  )}
+                </p>
+                {results.remainder > 0 && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    端数調整: {results.remainder}人が+1円（合計{formatCurrency(results.totalFare)}に一致）
+                  </p>
+                )}
               </div>
             )}
 
             {results.mode === "segments" && (
               <div className="border-t pt-4 space-y-4">
+                {(settings.pickupFee || 0) > 0 && (
+                  <div className="p-2 bg-muted/50 rounded text-xs text-muted-foreground">
+                    迎車料金 {formatCurrency(settings.pickupFee)} → {results.totalPassengers}人で均等分割（1人あたり{formatCurrency(results.pickupPerPerson)}）
+                  </div>
+                )}
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <h4 className="font-medium">区間ごとの内訳</h4>
-                    <span className="text-xs text-muted-foreground">1kmあたり {formatCurrency(Math.round(results.pricePerKm))}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {results.totalPassengers}人乗車 / 距離単価 {formatCurrency(Math.round(results.pricePerKm))}/km
+                    </span>
                   </div>
                   <p className="text-xs text-muted-foreground mb-2">タップで計算式を表示</p>
                   <div className="space-y-2">
@@ -626,11 +743,15 @@ export function TaxiCalculator({
                         >
                           <div className="flex items-center justify-between">
                             <div>
-                              <span className="font-medium">{seg.name || `区間 ${index + 1}`}</span>
+                              <span className="font-medium">{seg.name || `降車 ${index + 1}`}</span>
                               <span className="text-xs text-muted-foreground ml-2">({seg.distanceKm.toFixed(1)} km)</span>
+                              {(results.passengers[index]?.count ?? 1) > 1 && (
+                                <span className="text-xs text-muted-foreground ml-1">×{results.passengers[index].count}人</span>
+                              )}
                             </div>
                             <span className="font-bold text-primary">
                               {formatCurrency(results.passengers[index]?.amount ?? 0)}
+                              <span className="text-xs font-normal text-muted-foreground">/人</span>
                             </span>
                           </div>
                           <p className="text-xs text-muted-foreground mt-1">
@@ -640,28 +761,44 @@ export function TaxiCalculator({
                             <div className="mt-2 p-2 bg-background rounded text-xs space-y-1 border">
                               <p className="font-medium text-foreground">計算式:</p>
                               <p className="text-muted-foreground">
-                                区間料金 = 距離 × km単価
+                                区間料金 = 距離 × km単価（距離按分）
                               </p>
                               <p className="font-mono text-foreground">
                                 = {seg.distanceKm.toFixed(1)} km × {formatCurrency(Math.round(results.pricePerKm))}/km = {formatCurrency(seg.segmentFare)}
                               </p>
                               <p className="text-muted-foreground mt-1">
-                                1人あたり = 区間料金 ÷ 乗車人数
+                                距離按分の1人あたり = 区間料金 ÷ 乗車人数
                               </p>
                               <p className="font-mono text-foreground">
                                 = {formatCurrency(seg.segmentFare)} ÷ {seg.riderCount}人 = {formatCurrency(seg.perPersonShare)}
                               </p>
+                              {results.pickupPerPerson > 0 && (
+                                <>
+                                  <p className="text-muted-foreground mt-1">
+                                    + 迎車料金（均等分割）= {formatCurrency(results.pickupPerPerson)}/人
+                                  </p>
+                                </>
+                              )}
                               <p className="text-muted-foreground mt-1 pt-1 border-t">
-                                この区間で降りる人の支払い総額:
+                                この地点で降りる人の支払い（1人あたり）:
                               </p>
                               <p className="font-mono text-foreground">
-                                = ここまでの累積 = {formatCurrency(results.passengers[index]?.amount ?? 0)}
+                                = 距離累積{results.pickupPerPerson > 0 ? " + 迎車" : ""} = {formatCurrency(results.passengers[index]?.amount ?? 0)}
                               </p>
                             </div>
                           )}
                         </div>
                       )
                     })}
+                  </div>
+                  <div className="mt-3 pt-2 border-t flex items-center justify-between text-xs text-muted-foreground">
+                    <span>支払合計（{results.totalPassengers}人）</span>
+                    <span className="font-medium text-foreground">
+                      {formatCurrency(results.passengers.reduce((sum, p) => sum + p.amount * p.count, 0))}
+                      {results.passengers.reduce((sum, p) => sum + p.amount * p.count, 0) === results.totalFare && (
+                        <span className="text-green-600 ml-1">✓一致</span>
+                      )}
+                    </span>
                   </div>
                 </div>
               </div>

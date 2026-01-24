@@ -64,6 +64,16 @@ export default async function GroupPage() {
     }
   }
 
+  // Sync nickname from Auth.js name if nickname is not set
+  if (!dbUser.nickname && (dbUser.name || session.user.name)) {
+    const newNickname = dbUser.name || session.user.name!;
+    await db
+      .update(users)
+      .set({ nickname: newNickname, updatedAt: new Date() })
+      .where(eq(users.id, dbUser.id));
+    dbUser = { ...dbUser, nickname: newNickname };
+  }
+
   // Get tables where user is a member
   const memberships = await db
     .select({

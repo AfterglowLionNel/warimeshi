@@ -35,6 +35,7 @@ export default async function TableDetailPage({
     name: table.name,
     event_date: table.eventDate.toISOString().split("T")[0],
     invite_token: table.inviteToken,
+    invite_password: table.invitePassword ?? null,
     is_archived: table.isArchived,
     archived_at: table.archivedAt?.toISOString() ?? null,
     is_locked: table.isLocked,

@@ -118,7 +118,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     error: "/auth/error",
   },
   providers: [
-    Google(),
+    Google({
+      allowDangerousEmailAccountLinking: true,
+    }),
     LineProvider(),
   ],
 });

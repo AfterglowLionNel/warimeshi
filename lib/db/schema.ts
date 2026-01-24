@@ -84,6 +84,7 @@ export const tables = pgTable("tables", {
   name: text("name").notNull(),
   eventDate: date("event_date", { mode: "date" }).notNull(),
   inviteToken: text("invite_token").notNull().unique(),
+  invitePassword: text("invite_password"),
   isArchived: boolean("is_archived").default(false).notNull(),
   archivedAt: timestamp("archived_at", { mode: "date", withTimezone: true }),
   isLocked: boolean("is_locked").default(false).notNull(),

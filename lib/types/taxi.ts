@@ -22,6 +22,7 @@ export interface Segment {
   id: string
   name: string
   distanceKm: number
+  dropCount: number  // この区間で降りる人数
 }
 
 export type CalculationMode = "same" | "segments"

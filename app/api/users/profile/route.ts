@@ -54,7 +54,7 @@ export async function GET() {
   }
 
   let [dbUser] = await db
-    .select({ nickname: users.nickname, email: users.email, image: users.image })
+    .select({ id: users.id, nickname: users.nickname, email: users.email, image: users.image })
     .from(users)
     .where(eq(users.id, session.user.id))
     .limit(1);
@@ -62,13 +62,14 @@ export async function GET() {
   // Fallback to email search if user not found by ID
   if (!dbUser && session.user.email) {
     [dbUser] = await db
-      .select({ nickname: users.nickname, email: users.email, image: users.image })
+      .select({ id: users.id, nickname: users.nickname, email: users.email, image: users.image })
       .from(users)
       .where(eq(users.email, session.user.email))
       .limit(1);
   }
 
   return NextResponse.json({
+    id: dbUser?.id ?? session.user.id,
     email: session.user.email ?? dbUser?.email,
     nickname: dbUser?.nickname ?? null,
     image: session.user.image ?? dbUser?.image ?? null,

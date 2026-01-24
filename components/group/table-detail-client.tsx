@@ -594,6 +594,27 @@ export function TableDetailClient({
               </div>
             </div>
 
+            {isTableOwner && table.invite_password && (
+              <div className="flex items-center justify-between pt-2 border-t">
+                <div className="flex items-center gap-2">
+                  <Lock className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground">招待パスワード:</span>
+                  <code className="text-sm font-mono font-bold bg-muted px-2 py-0.5 rounded">{table.invite_password}</code>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    navigator.clipboard.writeText(table.invite_password!);
+                    toast.success("パスワードをコピーしました");
+                  }}
+                >
+                  <Copy className="h-3 w-3 mr-1" />
+                  コピー
+                </Button>
+              </div>
+            )}
+
             {isTableOwner && (
               <div className="flex items-center justify-between pt-2 border-t">
                 <div className="flex items-center gap-2">

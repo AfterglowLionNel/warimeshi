@@ -55,6 +55,7 @@ export default async function JoinTablePage({
       token={token}
       memberCount={members.length}
       ownerName={ownerMember?.displayName || "作成者"}
+      requiresPassword={!!table.invitePassword}
     />
   );
 }

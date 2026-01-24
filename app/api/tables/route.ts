@@ -40,6 +40,25 @@ async function resolveUserId(request: Request): Promise<{ userId: string | null;
   return { userId: null, isGuest: false };
 }
 
+function generateInvitePassword(): string {
+  const letters = "ABCDEFGHJKMNPQRSTUVWXYZ";
+  const digits = "23456789";
+  const all = letters + digits;
+
+  // Ensure at least one letter and one digit
+  let password = "";
+  password += letters[Math.floor(Math.random() * letters.length)];
+  password += digits[Math.floor(Math.random() * digits.length)];
+
+  // Fill remaining 2 characters
+  for (let i = 0; i < 2; i++) {
+    password += all[Math.floor(Math.random() * all.length)];
+  }
+
+  // Shuffle the characters
+  return password.split("").sort(() => Math.random() - 0.5).join("");
+}
+
 export async function POST(request: Request) {
   const { userId, isGuest } = await resolveUserId(request);
 
@@ -51,6 +70,7 @@ export async function POST(request: Request) {
   const tableName = body?.tableName as string | undefined;
   const eventDate = body?.eventDate as string | undefined;
   const displayName = body?.displayName as string | undefined;
+  const usePassword = body?.usePassword === true;
 
   if (!tableName || !eventDate || !displayName) {
     return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
@@ -58,6 +78,7 @@ export async function POST(request: Request) {
 
   const inviteToken = generateInviteToken();
   const autoLockAt = new Date(Date.now() + 12 * 60 * 60 * 1000);
+  const invitePassword = usePassword ? generateInvitePassword() : null;
 
   try {
     const [newTable] = await db
@@ -67,6 +88,7 @@ export async function POST(request: Request) {
         name: tableName.trim(),
         eventDate: new Date(eventDate),
         inviteToken,
+        invitePassword,
         autoLockAt,
       })
       .returning();

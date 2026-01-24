@@ -9,7 +9,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { ArrowLeft, Loader2, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { getGuestToken, hasGuestSession, setGuestSession } from "@/lib/guest/guest-session";
 
@@ -17,6 +18,7 @@ export default function CreateTablePage() {
   const [tableName, setTableName] = useState("");
   const [eventDate, setEventDate] = useState(new Date().toISOString().split("T")[0]);
   const [displayName, setDisplayName] = useState("");
+  const [usePassword, setUsePassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isGuest, setIsGuest] = useState(false);
   const router = useRouter();
@@ -89,7 +91,7 @@ export default function CreateTablePage() {
       const res = await fetch("/api/tables", {
         method: "POST",
         headers,
-        body: JSON.stringify({ tableName, eventDate, displayName }),
+        body: JSON.stringify({ tableName, eventDate, displayName, usePassword }),
       });
 
       if (res.status === 401) {
@@ -170,6 +172,17 @@ export default function CreateTablePage() {
                   onChange={(e) => setDisplayName(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">このテーブルでの表示名です（テーブルごとに変更可能）</p>
+              </div>
+
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div className="flex items-center gap-2">
+                  <Lock className="h-4 w-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-sm font-medium">招待パスワード</p>
+                    <p className="text-xs text-muted-foreground">参加時にパスワード入力を必須にする</p>
+                  </div>
+                </div>
+                <Switch checked={usePassword} onCheckedChange={setUsePassword} />
               </div>
 
               <Button type="submit" className="w-full" disabled={isLoading}>

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog"
 import { QrCode, Link2, Camera, X, Loader2 } from "lucide-react"
 import { toast } from "sonner"
+import jsQR from "jsqr"
 
 export function JoinSection() {
   const [isOpen, setIsOpen] = useState(false)
@@ -60,6 +61,11 @@ export function JoinSection() {
   }
 
   const stopCamera = () => {
+    scanningRef.current = false
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current)
+      animationRef.current = null
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop())
       streamRef.current = null
@@ -67,33 +73,47 @@ export function JoinSection() {
     setIsScanning(false)
   }
 
+  const scanningRef = useRef(false)
+  const animationRef = useRef<number | null>(null)
+
   const startCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" }
-      })
-      streamRef.current = stream
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        videoRef.current.play()
+      // Try rear camera first, fallback to any camera
+      let stream: MediaStream
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } }
+        })
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true
+        })
       }
+      streamRef.current = stream
+      scanningRef.current = true
       setIsScanning(true)
-      scanQRCode()
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Camera access error:", err)
-      toast.error("カメラへのアクセスが許可されていません")
+      const errorName = err instanceof Error ? err.name : ""
+      if (errorName === "NotAllowedError" || errorName === "PermissionDeniedError") {
+        toast.error("カメラへのアクセスを許可してください。ブラウザの設定からカメラの権限を確認してください。")
+      } else if (errorName === "NotFoundError") {
+        toast.error("カメラが見つかりません")
+      } else {
+        toast.error("カメラの起動に失敗しました")
+      }
     }
   }
 
-  const scanQRCode = () => {
-    if (!videoRef.current || !canvasRef.current || !isScanning) return
+  const scanQRCode = useCallback(() => {
+    if (!scanningRef.current || !videoRef.current || !canvasRef.current) return
 
     const video = videoRef.current
     const canvas = canvasRef.current
-    const ctx = canvas.getContext("2d")
+    const ctx = canvas.getContext("2d", { willReadFrequently: true })
 
     if (!ctx || video.readyState !== video.HAVE_ENOUGH_DATA) {
-      requestAnimationFrame(scanQRCode)
+      animationRef.current = requestAnimationFrame(scanQRCode)
       return
     }
 
@@ -101,45 +121,44 @@ export function JoinSection() {
     canvas.height = video.videoHeight
     ctx.drawImage(video, 0, 0)
 
-    try {
-      // Use BarcodeDetector if available (Chrome, Edge)
-      if ("BarcodeDetector" in window) {
-        const barcodeDetector = new (window as any).BarcodeDetector({ formats: ["qr_code"] })
-        barcodeDetector.detect(canvas)
-          .then((barcodes: any[]) => {
-            if (barcodes.length > 0) {
-              const qrData = barcodes[0].rawValue
-              const token = extractToken(qrData)
-              if (token) {
-                stopCamera()
-                setIsOpen(false)
-                router.push(`/group/join/${token}`)
-                return
-              }
-            }
-            if (streamRef.current) {
-              requestAnimationFrame(scanQRCode)
-            }
-          })
-          .catch(() => {
-            if (streamRef.current) {
-              requestAnimationFrame(scanQRCode)
-            }
-          })
-      } else {
-        // Fallback: just keep trying (won't actually detect without a library)
-        requestAnimationFrame(scanQRCode)
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+    const code = jsQR(imageData.data, imageData.width, imageData.height, {
+      inversionAttempts: "dontInvert",
+    })
+
+    if (code && code.data) {
+      const token = extractToken(code.data)
+      if (token) {
+        stopCamera()
+        setIsOpen(false)
+        router.push(`/group/join/${token}`)
+        return
       }
-    } catch {
-      requestAnimationFrame(scanQRCode)
     }
-  }
+
+    if (scanningRef.current) {
+      animationRef.current = requestAnimationFrame(scanQRCode)
+    }
+  }, [router])
 
   useEffect(() => {
-    if (isScanning && streamRef.current) {
-      scanQRCode()
+    if (isScanning && streamRef.current && videoRef.current) {
+      const video = videoRef.current
+      video.srcObject = streamRef.current
+      video.play().then(() => {
+        scanQRCode()
+      }).catch((err) => {
+        console.error("Video play error:", err)
+        stopCamera()
+        toast.error("カメラの映像を表示できませんでした")
+      })
     }
-  }, [isScanning])
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current)
+      }
+    }
+  }, [isScanning, scanQRCode])
 
   useEffect(() => {
     return () => {
@@ -174,9 +193,11 @@ export function JoinSection() {
               {/* QR Scanner */}
               {isScanning ? (
                 <div className="relative">
+                  {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
                   <video
                     ref={videoRef}
                     className="w-full aspect-square object-cover rounded-lg bg-black"
+                    autoPlay
                     playsInline
                     muted
                   />

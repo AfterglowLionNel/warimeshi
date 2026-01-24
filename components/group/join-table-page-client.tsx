@@ -30,11 +30,13 @@ interface JoinTablePageClientProps {
   token: string;
   memberCount?: number;
   ownerName?: string;
+  requiresPassword?: boolean;
   error?: string;
 }
 
-export function JoinTablePageClient({ table, token, memberCount = 0, ownerName = "作成者", error }: JoinTablePageClientProps) {
+export function JoinTablePageClient({ table, token, memberCount = 0, ownerName = "作成者", requiresPassword = false, error }: JoinTablePageClientProps) {
   const [displayName, setDisplayName] = useState("");
+  const [invitePassword, setInvitePassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -43,8 +45,14 @@ export function JoinTablePageClient({ table, token, memberCount = 0, ownerName =
 
   useEffect(() => {
     const checkAuth = async () => {
+      if (!table) {
+        setIsCheckingAuth(false);
+        return;
+      }
+
       const guestToken = getGuestToken();
       const guestUserId = getGuestUserId();
+      const headers: Record<string, string> = {};
 
       if (guestToken && guestUserId) {
         const res = await fetch(`/api/auth/guest?token=${encodeURIComponent(guestToken)}`);
@@ -53,6 +61,19 @@ export function JoinTablePageClient({ table, token, memberCount = 0, ownerName =
           setIsAuthenticated(true);
           setIsGuest(true);
           setDisplayName(data.nickname || "");
+          headers["X-Guest-Token"] = guestToken;
+
+          // 既にメンバーかチェック → メンバーならテーブル詳細へリダイレクト
+          const membersRes = await fetch(`/api/table-members?tableId=${table.id}`, { headers });
+          if (membersRes.ok) {
+            const membersData = await membersRes.json();
+            const isMember = membersData.data?.some((m: any) => m.userId === data.userId);
+            if (isMember) {
+              router.push(`/group/table/${token}`);
+              return;
+            }
+          }
+
           setIsCheckingAuth(false);
           return;
         }
@@ -64,12 +85,23 @@ export function JoinTablePageClient({ table, token, memberCount = 0, ownerName =
         setIsAuthenticated(true);
         setIsGuest(false);
         setDisplayName(data.nickname || data.email?.split("@")[0] || "");
+
+        // 既にメンバーかチェック → メンバーならテーブル詳細へリダイレクト
+        const membersRes = await fetch(`/api/table-members?tableId=${table.id}`);
+        if (membersRes.ok) {
+          const membersData = await membersRes.json();
+          const isMember = membersData.data?.some((m: any) => m.userId === data.id);
+          if (isMember) {
+            router.push(`/group/table/${token}`);
+            return;
+          }
+        }
       }
       setIsCheckingAuth(false);
     };
 
     checkAuth();
-  }, []);
+  }, [table, token, router]);
 
   if (error === "invalid_invite" || !table) {
     return (
@@ -176,6 +208,10 @@ export function JoinTablePageClient({ table, token, memberCount = 0, ownerName =
       toast.error("表示名を入力してください");
       return;
     }
+    if (requiresPassword && !invitePassword.trim()) {
+      toast.error("招待パスワードを入力してください");
+      return;
+    }
 
     setIsLoading(true);
 
@@ -211,6 +247,7 @@ export function JoinTablePageClient({ table, token, memberCount = 0, ownerName =
         body: JSON.stringify({
           tableId: table.id,
           displayName: displayName.trim(),
+          invitePassword: requiresPassword ? invitePassword.trim() : undefined,
         }),
       });
 
@@ -233,7 +270,8 @@ export function JoinTablePageClient({ table, token, memberCount = 0, ownerName =
       window.location.href = `/group/table/${token}`;
     } catch (error) {
       console.error("Error joining table:", error);
-      toast.error("テーブルへの参加に失敗しました");
+      const message = error instanceof Error ? error.message : "テーブルへの参加に失敗しました";
+      toast.error(message);
     } finally {
       setIsLoading(false);
     }
@@ -290,6 +328,22 @@ export function JoinTablePageClient({ table, token, memberCount = 0, ownerName =
                 />
                 <p className="text-xs text-muted-foreground">このテーブルでの表示名です</p>
               </div>
+
+              {requiresPassword && (
+                <div className="space-y-2">
+                  <Label htmlFor="invitePassword">招待パスワード *</Label>
+                  <Input
+                    id="invitePassword"
+                    placeholder="4桁の英数字"
+                    required
+                    maxLength={4}
+                    value={invitePassword}
+                    onChange={(e) => setInvitePassword(e.target.value.toUpperCase())}
+                    className="font-mono tracking-widest text-center text-lg uppercase"
+                  />
+                  <p className="text-xs text-muted-foreground">オーナーから共有されたパスワードを入力してください</p>
+                </div>
+              )}
 
               <Button type="submit" className="w-full" disabled={isLoading}>
                 {isLoading ? (

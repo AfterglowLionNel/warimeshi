@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { User } from "@/lib/types/group";
@@ -29,8 +29,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
   ArrowLeft,
   Plus,
+  UserPlus,
   Users,
   Calendar,
   Crown,
@@ -42,8 +51,12 @@ import {
   LogOut,
   ChevronRight,
   Loader2,
+  Link2,
+  Camera,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
+import jsQR from "jsqr";
 import {
   getGuestToken,
   getGuestUserId,
@@ -211,12 +224,15 @@ export function GroupPageClient({ serverUser, serverTables }: GroupPageClientPro
               <h1 className="text-xl font-bold text-primary">グループモード</h1>
               <p className="text-sm text-muted-foreground">テーブルを管理</p>
             </div>
-            <Button asChild size="sm">
-              <Link href="/group/create">
-                <Plus className="h-4 w-4 mr-1" />
-                新規作成
-              </Link>
-            </Button>
+            <div className="flex items-center gap-2">
+              <JoinTableButton />
+              <Button asChild size="sm">
+                <Link href="/group/create">
+                  <Plus className="h-4 w-4 mr-1" />
+                  新規作成
+                </Link>
+              </Button>
+            </div>
           </div>
         </div>
       </header>
@@ -243,9 +259,9 @@ export function GroupPageClient({ serverUser, serverTables }: GroupPageClientPro
                   </div>
                   {user.email ? (
                     <p className="text-xs text-muted-foreground">{user.email}</p>
-                  ) : (
+                  ) : isGuest ? (
                     <p className="text-xs text-muted-foreground">ログインすると履歴を保存できます</p>
-                  )}
+                  ) : null}
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -429,6 +445,231 @@ function GuestLoginPrompt() {
         </div>
       </div>
     </main>
+  );
+}
+
+function JoinTableButton() {
+  const [open, setOpen] = useState(false);
+  const [inviteCode, setInviteCode] = useState("");
+  const [isScanning, setIsScanning] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const scanningRef = useRef(false);
+  const animationRef = useRef<number | null>(null);
+  const router = useRouter();
+
+  const extractToken = (input: string): string | null => {
+    const trimmed = input.trim();
+    const joinMatch = trimmed.match(/\/group\/join\/([a-zA-Z0-9_-]+)/);
+    if (joinMatch) return joinMatch[1];
+    const tableMatch = trimmed.match(/\/group\/table\/([a-zA-Z0-9_-]+)/);
+    if (tableMatch) return tableMatch[1];
+    if (/^[a-zA-Z0-9_-]+$/.test(trimmed) && trimmed.length > 5) return trimmed;
+    return null;
+  };
+
+  const handleJoin = () => {
+    const token = extractToken(inviteCode);
+    if (!token) {
+      toast.error("有効な招待リンクまたはコードを入力してください");
+      return;
+    }
+    setOpen(false);
+    setInviteCode("");
+    router.push(`/group/join/${token}`);
+  };
+
+  const stopCamera = useCallback(() => {
+    scanningRef.current = false;
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+      animationRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setIsScanning(false);
+  }, []);
+
+  const scanQRCode = useCallback(() => {
+    if (!scanningRef.current || !videoRef.current || !canvasRef.current) return;
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+    if (!ctx || video.readyState !== video.HAVE_ENOUGH_DATA) {
+      animationRef.current = requestAnimationFrame(scanQRCode);
+      return;
+    }
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0);
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const code = jsQR(imageData.data, imageData.width, imageData.height, {
+      inversionAttempts: "dontInvert",
+    });
+
+    if (code && code.data) {
+      const token = extractToken(code.data);
+      if (token) {
+        stopCamera();
+        setOpen(false);
+        router.push(`/group/join/${token}`);
+        return;
+      }
+    }
+
+    if (scanningRef.current) {
+      animationRef.current = requestAnimationFrame(scanQRCode);
+    }
+  }, [router, stopCamera]);
+
+  const startCamera = async () => {
+    try {
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } }
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      }
+      streamRef.current = stream;
+      scanningRef.current = true;
+      setIsScanning(true);
+    } catch (err: unknown) {
+      const errorName = err instanceof Error ? err.name : "";
+      if (errorName === "NotAllowedError" || errorName === "PermissionDeniedError") {
+        toast.error("カメラへのアクセスを許可してください");
+      } else if (errorName === "NotFoundError") {
+        toast.error("カメラが見つかりません");
+      } else {
+        toast.error("カメラの起動に失敗しました");
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (isScanning && streamRef.current && videoRef.current) {
+      const video = videoRef.current;
+      video.srcObject = streamRef.current;
+      video.play().then(() => {
+        scanQRCode();
+      }).catch(() => {
+        stopCamera();
+        toast.error("カメラの映像を表示できませんでした");
+      });
+    }
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
+  }, [isScanning, scanQRCode, stopCamera]);
+
+  useEffect(() => {
+    return () => { stopCamera(); };
+  }, [stopCamera]);
+
+  const handleDialogChange = (isOpen: boolean) => {
+    setOpen(isOpen);
+    if (!isOpen) {
+      stopCamera();
+      setInviteCode("");
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleDialogChange}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm">
+          <UserPlus className="h-4 w-4 mr-1" />
+          参加
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>テーブルに参加</DialogTitle>
+          <DialogDescription>
+            QRコードをスキャンまたは招待コードを入力
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          {/* QR Scanner */}
+          {isScanning ? (
+            <div className="relative">
+              {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+              <video
+                ref={videoRef}
+                className="w-full aspect-square object-cover rounded-lg bg-black"
+                autoPlay
+                playsInline
+                muted
+              />
+              <canvas ref={canvasRef} className="hidden" />
+              <Button
+                variant="secondary"
+                size="sm"
+                className="absolute top-2 right-2"
+                onClick={stopCamera}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="w-48 h-48 border-2 border-primary rounded-lg" />
+              </div>
+              <p className="text-xs text-center text-muted-foreground mt-2">
+                QRコードを枠内に合わせてください
+              </p>
+            </div>
+          ) : (
+            <Button
+              variant="outline"
+              className="w-full h-20 flex-col gap-2"
+              onClick={startCamera}
+            >
+              <Camera className="h-6 w-6" />
+              <span className="text-sm">QRコードをスキャン</span>
+            </Button>
+          )}
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-background px-2 text-muted-foreground">または</span>
+            </div>
+          </div>
+
+          {/* URL/Code Input */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Link2 className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium">招待リンク・コードを入力</span>
+            </div>
+            <Input
+              placeholder="https://... または招待コード"
+              value={inviteCode}
+              onChange={(e) => setInviteCode(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleJoin(); }}
+            />
+            <Button
+              className="w-full"
+              onClick={handleJoin}
+              disabled={!inviteCode.trim()}
+            >
+              参加する
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

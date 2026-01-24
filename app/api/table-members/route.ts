@@ -59,6 +59,7 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const tableId = body?.tableId as string | undefined;
   const displayName = body?.displayName as string | undefined;
+  const invitePassword = body?.invitePassword as string | undefined;
   const isGuest = body?.isGuest === true;
 
   if (!tableId || !displayName) {
@@ -70,6 +71,7 @@ export async function POST(request: Request) {
     .select({
       id: tables.id,
       ownerUserId: tables.ownerUserId,
+      invitePassword: tables.invitePassword,
       isArchived: tables.isArchived,
       isLocked: tables.isLocked,
       autoLockAt: tables.autoLockAt,
@@ -87,9 +89,18 @@ export async function POST(request: Request) {
   }
 
   // Check if table is locked (either manually or auto-locked)
+  // オーナーはロックをバイパスできる
+  const isOwner = table.ownerUserId === userId;
   const isAutoLocked = table.autoLockAt && new Date(table.autoLockAt) < new Date();
-  if (table.isLocked || isAutoLocked) {
+  if ((table.isLocked || isAutoLocked) && !isOwner) {
     return NextResponse.json({ error: "このセッションは参加を締め切りました" }, { status: 403 });
+  }
+
+  // Check invite password (only for non-owner regular joins)
+  if (table.invitePassword && !isOwner && !isGuest) {
+    if (!invitePassword || invitePassword.trim().toUpperCase() !== table.invitePassword.toUpperCase()) {
+      return NextResponse.json({ error: "招待パスワードが正しくありません" }, { status: 403 });
+    }
   }
 
   if (isGuest) {

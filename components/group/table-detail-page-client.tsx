@@ -15,6 +15,7 @@ interface TableData {
   name: string;
   event_date: string;
   invite_token: string;
+  invite_password: string | null;
   is_archived: boolean;
   archived_at: string | null;
   is_locked: boolean;

@@ -12,6 +12,7 @@ export interface SoloSession {
   createdAt: number
   lastModified: number
   orders: SoloOrder[]
+  memo?: string
 }
 
 export type SortField = "createdAt" | "itemName" | "unitPrice" | "quantity"

@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { users, orders, tables, tableMembers } from "@/lib/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { resolveUserIdFromGuestToken } from "@/lib/auth/permissions";
+import { tableEvents } from "@/lib/events/table-events";
 
 async function resolveUserId(request: Request): Promise<string | null> {
   const session = await auth();
@@ -97,19 +98,41 @@ export async function PATCH(
   const unitPrice = updates.unit_price !== undefined ? Number(updates.unit_price) : order.unitPrice;
   const quantity = updates.quantity !== undefined ? Number(updates.quantity) : order.quantity;
 
-  if (Number.isNaN(unitPrice) || unitPrice < 0) {
+  if (!Number.isFinite(unitPrice) || unitPrice < 0 || unitPrice > 10_000_000) {
     return NextResponse.json({ error: "金額が不正です" }, { status: 400 });
   }
 
-  if (Number.isNaN(quantity) || quantity < 1) {
+  if (!Number.isFinite(quantity) || !Number.isInteger(quantity) || quantity < 1 || quantity > 10_000) {
     return NextResponse.json({ error: "数量が不正です" }, { status: 400 });
+  }
+
+  // member_id を変更する場合、新しい member が同じ table に所属していることを確認。
+  // 検証なしだと他人の注文を別メンバー (別テーブルすら) に付け替えて精算を歪められる。
+  let nextMemberId = order.memberId;
+  if (updates.member_id !== undefined && updates.member_id !== order.memberId) {
+    const requestedMemberId = updates.member_id;
+    if (typeof requestedMemberId !== "string") {
+      return NextResponse.json({ error: "member_id が不正です" }, { status: 400 });
+    }
+    const [targetMember] = await db
+      .select({ id: tableMembers.id })
+      .from(tableMembers)
+      .where(and(eq(tableMembers.id, requestedMemberId), eq(tableMembers.tableId, order.tableId)))
+      .limit(1);
+    if (!targetMember) {
+      return NextResponse.json(
+        { error: "指定されたメンバーはこのテーブルに存在しません" },
+        { status: 400 },
+      );
+    }
+    nextMemberId = requestedMemberId;
   }
 
   try {
     await db
       .update(orders)
       .set({
-        memberId: updates.member_id ?? order.memberId,
+        memberId: nextMemberId,
         itemName: updates.item_name ?? order.itemName ?? null,
         unitPrice,
         quantity,
@@ -117,6 +140,8 @@ export async function PATCH(
         updatedAt: new Date(),
       })
       .where(and(eq(orders.id, orderId), isNull(orders.deletedAt)));
+
+    tableEvents.emitTableEvent(order.tableId, "order:updated", { orderId });
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -174,6 +199,8 @@ export async function DELETE(
       .update(orders)
       .set({ deletedAt: new Date(), updatedAt: new Date() })
       .where(eq(orders.id, orderId));
+
+    tableEvents.emitTableEvent(order.tableId, "order:deleted", { orderId });
 
     return NextResponse.json({ success: true });
   } catch (error) {

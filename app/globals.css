@@ -3,81 +3,101 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* <CHANGE> Updated color scheme to orange/amber for warimeshi app */
+/* warimeshi リデザイン — 和紙基調 + 朱アクセント */
 :root {
-  --background: oklch(0.99 0.01 85);
-  --foreground: oklch(0.2 0.02 50);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.2 0.02 50);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.2 0.02 50);
-  --primary: oklch(0.65 0.18 50);
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.95 0.03 80);
-  --secondary-foreground: oklch(0.3 0.05 50);
-  --muted: oklch(0.96 0.02 80);
-  --muted-foreground: oklch(0.5 0.02 50);
-  --accent: oklch(0.75 0.15 70);
-  --accent-foreground: oklch(0.2 0.02 50);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(1 0 0);
-  --border: oklch(0.9 0.02 80);
-  --input: oklch(0.92 0.02 80);
-  --ring: oklch(0.65 0.18 50);
-  --chart-1: oklch(0.65 0.18 50);
-  --chart-2: oklch(0.75 0.15 70);
-  --chart-3: oklch(0.55 0.12 40);
-  --chart-4: oklch(0.8 0.12 90);
-  --chart-5: oklch(0.7 0.16 60);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.98 0.01 80);
-  --sidebar-foreground: oklch(0.2 0.02 50);
-  --sidebar-primary: oklch(0.65 0.18 50);
-  --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: oklch(0.95 0.03 80);
-  --sidebar-accent-foreground: oklch(0.3 0.05 50);
-  --sidebar-border: oklch(0.9 0.02 80);
-  --sidebar-ring: oklch(0.65 0.18 50);
+  /* shadcn 互換トークン (新パレットへマップ) */
+  --background: #FAFAF7;
+  --foreground: #1A1A1A;
+  --card: #FFFFFF;
+  --card-foreground: #1A1A1A;
+  --popover: #FFFFFF;
+  --popover-foreground: #1A1A1A;
+  --primary: #C8553D;
+  --primary-foreground: #FFFFFF;
+  --secondary: #F2F1EC;
+  --secondary-foreground: #1A1A1A;
+  --muted: #F2F1EC;
+  --muted-foreground: #52524E;
+  --accent: #F6E4DE;
+  --accent-foreground: #A93E2A;
+  --destructive: #B23A2E;
+  --destructive-foreground: #FFFFFF;
+  --border: #E7E5DF;
+  --input: #E7E5DF;
+  --ring: #C8553D;
+  --chart-1: #C8553D;
+  --chart-2: #3F6B4E;
+  --chart-3: #3D5C7C;
+  --chart-4: #A47B3D;
+  --chart-5: #B8843D;
+  --radius: 0.75rem;
+  --sidebar: #FAFAF7;
+  --sidebar-foreground: #1A1A1A;
+  --sidebar-primary: #C8553D;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #F2F1EC;
+  --sidebar-accent-foreground: #1A1A1A;
+  --sidebar-border: #E7E5DF;
+  --sidebar-ring: #C8553D;
+
+  /* warimeshi 拡張トークン (デザイン由来) */
+  --wm-bg: #FAFAF7;
+  --wm-surface: #F2F1EC;
+  --wm-card: #FFFFFF;
+  --wm-line: #E7E5DF;
+  --wm-line-strong: #D9D6CE;
+  --wm-ink: #1A1A1A;
+  --wm-ink-2: #52524E;
+  --wm-ink-3: #9A9892;
+  --wm-ink-4: #C2BFB7;
+  --wm-accent: #C8553D;
+  --wm-accent-pressed: #A93E2A;
+  --wm-accent-soft: #F6E4DE;
+  --wm-success: #3F6B4E;
+  --wm-success-soft: #E1ECDF;
+  --wm-warning: #B8843D;
+  --wm-shadow-1: 0 1px 2px rgba(20, 18, 12, 0.04), 0 1px 1px rgba(20, 18, 12, 0.03);
+  --wm-shadow-2: 0 1px 2px rgba(20, 18, 12, 0.05), 0 6px 18px rgba(20, 18, 12, 0.06);
 }
 
 .dark {
-  --background: oklch(0.15 0.02 50);
-  --foreground: oklch(0.95 0.01 80);
-  --card: oklch(0.18 0.02 50);
-  --card-foreground: oklch(0.95 0.01 80);
-  --popover: oklch(0.18 0.02 50);
-  --popover-foreground: oklch(0.95 0.01 80);
-  --primary: oklch(0.7 0.18 50);
-  --primary-foreground: oklch(0.1 0.02 50);
-  --secondary: oklch(0.25 0.03 50);
-  --secondary-foreground: oklch(0.95 0.01 80);
-  --muted: oklch(0.25 0.02 50);
-  --muted-foreground: oklch(0.7 0.02 80);
-  --accent: oklch(0.35 0.08 50);
-  --accent-foreground: oklch(0.95 0.01 80);
-  --destructive: oklch(0.5 0.2 25);
-  --destructive-foreground: oklch(0.95 0.01 80);
-  --border: oklch(0.28 0.02 50);
-  --input: oklch(0.28 0.02 50);
-  --ring: oklch(0.7 0.18 50);
-  --chart-1: oklch(0.7 0.18 50);
-  --chart-2: oklch(0.65 0.15 70);
-  --chart-3: oklch(0.6 0.12 40);
-  --chart-4: oklch(0.75 0.12 90);
-  --chart-5: oklch(0.68 0.16 60);
-  --sidebar: oklch(0.2 0.02 50);
-  --sidebar-foreground: oklch(0.95 0.01 80);
-  --sidebar-primary: oklch(0.7 0.18 50);
-  --sidebar-primary-foreground: oklch(0.1 0.02 50);
-  --sidebar-accent: oklch(0.28 0.03 50);
-  --sidebar-accent-foreground: oklch(0.95 0.01 80);
-  --sidebar-border: oklch(0.28 0.02 50);
-  --sidebar-ring: oklch(0.7 0.18 50);
+  --background: #14130F;
+  --foreground: #F2F1EC;
+  --card: #1C1B17;
+  --card-foreground: #F2F1EC;
+  --popover: #1C1B17;
+  --popover-foreground: #F2F1EC;
+  --primary: #D86D55;
+  --primary-foreground: #FFFFFF;
+  --secondary: #28261F;
+  --secondary-foreground: #F2F1EC;
+  --muted: #28261F;
+  --muted-foreground: #B5B2A8;
+  --accent: #3D2620;
+  --accent-foreground: #E8B5A8;
+  --destructive: #C24A3D;
+  --destructive-foreground: #FFFFFF;
+  --border: #2E2C25;
+  --input: #2E2C25;
+  --ring: #D86D55;
+  --chart-1: #D86D55;
+  --chart-2: #6B9B7A;
+  --chart-3: #6F8AAA;
+  --chart-4: #C19D5F;
+  --chart-5: #D8A35A;
+  --sidebar: #14130F;
+  --sidebar-foreground: #F2F1EC;
+  --sidebar-primary: #D86D55;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #28261F;
+  --sidebar-accent-foreground: #F2F1EC;
+  --sidebar-border: #2E2C25;
+  --sidebar-ring: #D86D55;
 }
 
 @theme inline {
-  --font-sans: "Geist", "Geist Fallback";
-  --font-mono: "Geist Mono", "Geist Mono Fallback";
+  --font-sans: var(--font-zen-kaku), "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif;
+  --font-mono: var(--font-inter), "SF Pro Text", system-ui, sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -122,5 +142,115 @@
   }
   body {
     @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "palt";
   }
+}
+
+/* ===== warimeshi 共通ユーティリティ ===== */
+
+.wm-num {
+  font-family: var(--font-inter), "SF Pro Text", system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.wm-screen {
+  width: 100%;
+  min-height: 100vh;
+  background: var(--wm-bg);
+  position: relative;
+}
+
+.wm-card {
+  background: var(--wm-card);
+  border-radius: 16px;
+  box-shadow: var(--wm-shadow-1);
+  border: 1px solid var(--wm-line);
+}
+
+.wm-card-dark {
+  background: var(--wm-ink);
+  color: #fff;
+  border-radius: 16px;
+  border: none;
+}
+
+.wm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--wm-surface);
+  color: var(--wm-ink-2);
+}
+
+.wm-chip-accent {
+  background: var(--wm-accent-soft);
+  color: var(--wm-accent-pressed);
+}
+
+.wm-chip-success {
+  background: var(--wm-success-soft);
+  color: var(--wm-success);
+}
+
+.wm-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--wm-surface);
+  padding: 4px;
+  border-radius: 12px;
+}
+
+.wm-tab {
+  flex: 1;
+  text-align: center;
+  padding: 8px 10px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--wm-ink-2);
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  transition: background 0.15s, color 0.15s;
+}
+
+.wm-tab.is-active {
+  background: var(--wm-card);
+  color: var(--wm-ink);
+  box-shadow: var(--wm-shadow-1);
+}
+
+.wm-meta {
+  font-size: 12px;
+  color: var(--wm-ink-3);
+}
+
+.wm-divider {
+  height: 1px;
+  background: var(--wm-line);
+}
+
+.wm-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #fff;
+}
+
+/* iOS Safari セーフエリア対応 */
+.wm-safe-bottom {
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
 }

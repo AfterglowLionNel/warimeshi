@@ -3,10 +3,21 @@ import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import crypto from "crypto";
+import { clientKey, rateLimit, rateLimitHeaders } from "@/lib/security/rate-limit";
 
 const GUEST_TOKEN_EXPIRY_DAYS = 30;
+const GUEST_COOKIE_NAME = "wm_guest_token";
 
 export async function POST(request: Request) {
+  // ゲスト作成は IP あたり 1 時間 5 回まで (大量生成 / DoS 防止)
+  const limit = rateLimit(clientKey(request, "guest-create"), { windowSec: 3600, max: 5 });
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: "ゲスト作成の試行回数が上限に達しました。しばらく経ってからお試しください。" },
+      { status: 429, headers: rateLimitHeaders(limit) },
+    );
+  }
+
   const body = await request.json().catch(() => null);
   const displayName = body?.displayName as string | undefined;
 
@@ -29,10 +40,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Failed to create guest user" }, { status: 400 });
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       guestToken: newUser.guestToken,
       userId: newUser.id,
     });
+
+    // HttpOnly Cookie に同じ guestToken を保存。
+    // /api/auth/link-guest はこの cookie 値と body の guestToken が一致した時のみデータ移管を許可する。
+    // localStorage 単体では他人のトークンを攻撃者が body に詰めて乗っ取れてしまうため。
+    if (newUser.guestToken) {
+      response.cookies.set(GUEST_COOKIE_NAME, newUser.guestToken, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: GUEST_TOKEN_EXPIRY_DAYS * 24 * 60 * 60,
+      });
+    }
+
+    return response;
   } catch (error) {
     console.error("Guest user creation error:", error);
     return NextResponse.json({ error: "Failed to create guest session" }, { status: 500 });

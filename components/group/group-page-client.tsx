@@ -85,7 +85,7 @@ export function GroupPageClient({ serverUser, serverTables }: GroupPageClientPro
   const [tables, setTables] = useState<TableData[]>(serverTables);
   const [isLoading, setIsLoading] = useState(!serverUser);
   const [isGuest, setIsGuest] = useState(false);
-  const router = useRouter();
+  const _router = useRouter();
 
   const fetchGuestData = useCallback(async () => {
     const guestToken = getGuestToken();
@@ -343,7 +343,7 @@ export function GroupPageClient({ serverUser, serverTables }: GroupPageClientPro
 function GuestLoginPrompt() {
   const [isCreatingGuest, setIsCreatingGuest] = useState(false);
   const [guestName, setGuestName] = useState("");
-  const router = useRouter();
+  const _router = useRouter();
 
   const handleStartAsGuest = async () => {
     setIsCreatingGuest(true);
@@ -603,7 +603,6 @@ function JoinTableButton() {
           {/* QR Scanner */}
           {isScanning ? (
             <div className="relative">
-              {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
               <video
                 ref={videoRef}
                 className="w-full aspect-square object-cover rounded-lg bg-black"

@@ -15,3 +15,10 @@ coverage/
 
 tsconfig.tsbuildinfo
 package-lock.json
+
+# 機密 / ローカル成果物 (本番 DB dump, セッション cookie, 解凍したデザインバンドル)
+*.dump
+*.sql.gz
+*.bak
+cookies.txt
+.design-extracted/

@@ -59,7 +59,7 @@ interface GroupDashboardProps {
 
 export function GroupDashboard({ user, tables: initialTables }: GroupDashboardProps) {
   const [tables, setTables] = useState(initialTables)
-  const router = useRouter()
+  const _router = useRouter()
 
   const activeTables = tables.filter((t) => !t.is_archived)
   const archivedTables = tables.filter((t) => t.is_archived)
@@ -93,66 +93,60 @@ export function GroupDashboard({ user, tables: initialTables }: GroupDashboardPr
   }
 
   return (
-    <main className="min-h-screen flex flex-col">
-      {/* Header */}
-      <header className="border-b bg-card">
-        <div className="container mx-auto px-4 py-4">
-          <Link
-            href="/"
-            className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mb-2"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            トップに戻る
-          </Link>
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-xl font-bold text-primary">グループモード</h1>
-              <p className="text-sm text-muted-foreground">テーブルを管理</p>
-            </div>
-            <Button asChild size="sm">
-              <Link href="/group/create">
-                <Plus className="h-4 w-4 mr-1" />
-                新規作成
-              </Link>
-            </Button>
-          </div>
-        </div>
-      </header>
+    <main className="min-h-screen bg-background">
+      <div className="mx-auto w-full max-w-md px-4 pt-5">
+        <Link
+          href="/"
+          className="inline-flex items-center gap-1.5 text-[13px] text-[var(--wm-ink-3)] transition-colors hover:text-foreground"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          トップに戻る
+        </Link>
 
-      <div className="flex-1 container mx-auto px-4 py-4 space-y-4">
-        {/* User Info */}
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                  <span className="text-lg font-bold text-primary">
-                    {user.nickname?.charAt(0) || user.email?.charAt(0) || "U"}
-                  </span>
-                </div>
-                <div>
-                  <p className="font-medium">{user.nickname || "ユーザー"}</p>
-                  <p className="text-xs text-muted-foreground">{user.email}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button asChild variant="outline" size="sm">
-                  <Link href="/settings">
-                    <Settings className="h-4 w-4" />
-                  </Link>
-                </Button>
-                <Button asChild variant="outline" size="sm">
-                  <Link href="/auth/logout" prefetch={false}>
-                    <LogOut className="h-4 w-4" />
-                  </Link>
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="mt-3 flex items-center gap-3">
+          <div>
+            <div className="text-[12px] text-[var(--wm-ink-3)]">グループモード</div>
+            <h1 className="mt-0.5 text-[22px] font-bold tracking-tight">テーブル一覧</h1>
+          </div>
+          <Button asChild size="sm" className="ml-auto">
+            <Link href="/group/create">
+              <Plus className="mr-0.5 h-4 w-4" />
+              新規作成
+            </Link>
+          </Button>
+        </div>
+
+        {/* user panel */}
+        <div className="wm-card mt-4 flex items-center gap-3 p-3">
+          <span
+            className="wm-avatar"
+            style={{
+              width: 40,
+              height: 40,
+              fontSize: 15,
+              background: "var(--wm-ink)",
+            }}
+          >
+            {user.nickname?.charAt(0) || user.email?.charAt(0) || "U"}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[14px] font-semibold">{user.nickname || "ユーザー"}</p>
+            <p className="truncate text-[11px] text-[var(--wm-ink-3)]">{user.email}</p>
+          </div>
+          <Button asChild variant="outline" size="icon" className="h-9 w-9 bg-card" aria-label="設定">
+            <Link href="/settings">
+              <Settings className="h-4 w-4" />
+            </Link>
+          </Button>
+          <Button asChild variant="outline" size="icon" className="h-9 w-9 bg-card" aria-label="ログアウト">
+            <Link href="/auth/logout" prefetch={false}>
+              <LogOut className="h-4 w-4" />
+            </Link>
+          </Button>
+        </div>
 
         {/* Tables */}
-        <Tabs defaultValue="active">
+        <Tabs defaultValue="active" className="mt-5">
           <TabsList className="w-full">
             <TabsTrigger value="active" className="flex-1">
               参加中 ({activeTables.length})

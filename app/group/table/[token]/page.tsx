@@ -1,7 +1,16 @@
+import type { Metadata } from "next";
 import { db } from "@/lib/db";
 import { tables, tableMembers } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { TableDetailPageClient } from "@/components/group/table-detail-page-client";
+
+// 動的URLは検索エンジンにインデックスさせない
+export const metadata: Metadata = {
+  robots: {
+    index: false,
+    follow: false,
+  },
+};
 
 export default async function TableDetailPage({
   params,

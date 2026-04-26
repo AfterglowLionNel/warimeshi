@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users, tables, tableMembers, orders } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+
+const GUEST_COOKIE_NAME = "wm_guest_token";
 
 export async function POST(request: Request) {
   const session = await auth();
@@ -16,6 +19,17 @@ export async function POST(request: Request) {
 
   if (!guestToken) {
     return NextResponse.json({ error: "guestToken is required" }, { status: 400 });
+  }
+
+  // 所有権検証: HttpOnly Cookie に保存された guestToken と body の guestToken が一致することを要求。
+  // これにより、他人の guestToken を入手しただけでは link-guest 経由でデータを乗っ取れない。
+  const cookieStore = await cookies();
+  const cookieToken = cookieStore.get(GUEST_COOKIE_NAME)?.value;
+  if (!cookieToken || cookieToken !== guestToken) {
+    return NextResponse.json(
+      { error: "ゲストトークンの所有者として確認できませんでした。ゲストとして利用していたデバイスからログインしてリンクしてください。" },
+      { status: 403 },
+    );
   }
 
   // Find the authenticated user in DB
@@ -72,13 +86,15 @@ export async function POST(request: Request) {
       })
       .where(eq(users.id, guestUser.id));
 
-    return NextResponse.json({
+    const sameUserResponse = NextResponse.json({
       success: true,
       message: "Guest status cleared",
       migratedTables: 0,
       migratedMemberships: 0,
       migratedOrders: 0,
     });
+    sameUserResponse.cookies.delete(GUEST_COOKIE_NAME);
+    return sameUserResponse;
   }
 
   try {
@@ -113,13 +129,16 @@ export async function POST(request: Request) {
     // 5. Delete the guest user record
     await db.delete(users).where(eq(users.id, guestUser.id));
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       message: "Guest data successfully linked to your account",
       migratedTables: updatedTables.length,
       migratedMemberships: updatedMemberships.length,
       migratedOrders: updatedOrders.length,
     });
+    // 移管完了後は所有権 Cookie を削除し、再利用 (リプレイ) を防ぐ。
+    response.cookies.delete(GUEST_COOKIE_NAME);
+    return response;
   } catch (error) {
     console.error("Link guest error:", error);
     return NextResponse.json({ error: "Failed to link guest account" }, { status: 500 });

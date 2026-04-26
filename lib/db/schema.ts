@@ -84,11 +84,13 @@ export const tables = pgTable("tables", {
   name: text("name").notNull(),
   eventDate: date("event_date", { mode: "date" }).notNull(),
   inviteToken: text("invite_token").notNull().unique(),
+  inviteTokenExpiresAt: timestamp("invite_token_expires_at", { mode: "date", withTimezone: true }),
   invitePassword: text("invite_password"),
   isArchived: boolean("is_archived").default(false).notNull(),
   archivedAt: timestamp("archived_at", { mode: "date", withTimezone: true }),
   isLocked: boolean("is_locked").default(false).notNull(),
   autoLockAt: timestamp("auto_lock_at", { mode: "date", withTimezone: true }),
+  settlementSettings: jsonb("settlement_settings"),
   createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date", withTimezone: true }).defaultNow().notNull(),
 });
@@ -120,9 +122,29 @@ export const orders = pgTable("orders", {
   unitPrice: integer("unit_price").notNull(),
   quantity: integer("quantity").default(1).notNull(),
   lineTotal: integer("line_total").notNull(),
+  isShared: boolean("is_shared").default(false).notNull(),
+  sharedGroupId: uuid("shared_group_id"),
   deletedAt: timestamp("deleted_at", { mode: "date", withTimezone: true }),
   createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { mode: "date", withTimezone: true }).defaultNow().notNull(),
+});
+
+export const payments = pgTable("payments", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  tableId: uuid("table_id")
+    .notNull()
+    .references(() => tables.id, { onDelete: "cascade" }),
+  fromMemberId: uuid("from_member_id")
+    .notNull()
+    .references(() => tableMembers.id, { onDelete: "cascade" }),
+  toMemberId: uuid("to_member_id")
+    .notNull()
+    .references(() => tableMembers.id, { onDelete: "cascade" }),
+  amount: integer("amount").notNull(),
+  isPaid: boolean("is_paid").default(false).notNull(),
+  paidAt: timestamp("paid_at", { mode: "date", withTimezone: true }),
+  splitMode: text("split_mode").notNull(),
+  createdAt: timestamp("created_at", { mode: "date", withTimezone: true }).defaultNow().notNull(),
 });
 
 export const taxiRecords = pgTable("taxi_records", {
@@ -204,6 +226,7 @@ export const tablesRelations = relations(tables, ({ one, many }) => ({
   }),
   members: many(tableMembers),
   orders: many(orders),
+  payments: many(payments),
   taxiRecords: many(taxiRecords),
   taxiRides: many(taxiRides),
 }));
@@ -236,6 +259,23 @@ export const ordersRelations = relations(orders, ({ one }) => ({
   member: one(tableMembers, {
     fields: [orders.memberId],
     references: [tableMembers.id],
+  }),
+}));
+
+export const paymentsRelations = relations(payments, ({ one }) => ({
+  table: one(tables, {
+    fields: [payments.tableId],
+    references: [tables.id],
+  }),
+  fromMember: one(tableMembers, {
+    fields: [payments.fromMemberId],
+    references: [tableMembers.id],
+    relationName: "paymentFrom",
+  }),
+  toMember: one(tableMembers, {
+    fields: [payments.toMemberId],
+    references: [tableMembers.id],
+    relationName: "paymentTo",
   }),
 }));
 
@@ -284,6 +324,9 @@ export type NewTableMember = typeof tableMembers.$inferInsert;
 
 export type Order = typeof orders.$inferSelect;
 export type NewOrder = typeof orders.$inferInsert;
+
+export type Payment = typeof payments.$inferSelect;
+export type NewPayment = typeof payments.$inferInsert;
 
 export type TaxiRecord = typeof taxiRecords.$inferSelect;
 export type NewTaxiRecord = typeof taxiRecords.$inferInsert;

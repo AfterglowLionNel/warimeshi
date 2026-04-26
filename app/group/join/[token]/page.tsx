@@ -1,7 +1,16 @@
+import type { Metadata } from "next";
 import { db } from "@/lib/db";
 import { tables, tableMembers } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { JoinTablePageClient } from "@/components/group/join-table-page-client";
+
+// 招待URLは無限に生成されるため、検索エンジンにインデックスさせない
+export const metadata: Metadata = {
+  robots: {
+    index: false,
+    follow: false,
+  },
+};
 
 export default async function JoinTablePage({
   params,
@@ -19,6 +28,11 @@ export default async function JoinTablePage({
 
   if (!table) {
     return <JoinTablePageClient table={null} token={token} error="invalid_invite" />;
+  }
+
+  // 招待トークンの有効期限をチェック
+  if (table.inviteTokenExpiresAt && new Date(table.inviteTokenExpiresAt) < new Date()) {
+    return <JoinTablePageClient table={null} token={token} error="invite_expired" />;
   }
 
   // Get current member count

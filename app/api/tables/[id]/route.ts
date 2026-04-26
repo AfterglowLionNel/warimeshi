@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { users, tables } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { resolveUserIdFromGuestToken } from "@/lib/auth/permissions";
+import { generateInviteToken } from "@/lib/utils/format";
 
 async function resolveUserId(request: Request): Promise<string | null> {
   const session = await auth();
@@ -122,6 +123,15 @@ export async function PATCH(
       updates.autoLockAt = body.autoLockAt ? new Date(body.autoLockAt) : null;
     }
 
+    // Handle invite token regeneration (invalidates old token)
+    let newInviteToken: string | undefined;
+    if (body.regenerateInviteToken === true) {
+      newInviteToken = generateInviteToken();
+      updates.inviteToken = newInviteToken;
+      // Reset expiration to 7 days from now
+      updates.inviteTokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    }
+
     updates.updatedAt = new Date();
 
     await db.update(tables).set(updates).where(eq(tables.id, tableId));
@@ -132,6 +142,8 @@ export async function PATCH(
         id: tables.id,
         isLocked: tables.isLocked,
         autoLockAt: tables.autoLockAt,
+        inviteToken: tables.inviteToken,
+        inviteTokenExpiresAt: tables.inviteTokenExpiresAt,
       })
       .from(tables)
       .where(eq(tables.id, tableId))
@@ -141,6 +153,8 @@ export async function PATCH(
       success: true,
       isLocked: updatedTable.isLocked,
       autoLockAt: updatedTable.autoLockAt?.toISOString() ?? null,
+      inviteToken: newInviteToken ? updatedTable.inviteToken : undefined,
+      inviteTokenExpiresAt: newInviteToken ? updatedTable.inviteTokenExpiresAt?.toISOString() : undefined,
     });
   } catch (error) {
     console.error("Table update error:", error);

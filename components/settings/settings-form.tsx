@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import type { User } from "@/lib/types/group"
@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { ArrowLeft, Loader2, Save } from "lucide-react"
 import { toast } from "sonner"
 
@@ -20,7 +21,13 @@ interface SettingsFormProps {
 export function SettingsForm({ user }: SettingsFormProps) {
   const [nickname, setNickname] = useState(user.nickname || "")
   const [isLoading, setIsLoading] = useState(false)
+  const [swDisabled, setSwDisabled] = useState(false)
   const router = useRouter()
+
+  // Load SW setting from localStorage
+  useEffect(() => {
+    setSwDisabled(localStorage.getItem("sw-disabled") === "1")
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -102,6 +109,47 @@ export function SettingsForm({ user }: SettingsFormProps) {
                 )}
               </Button>
             </form>
+          </CardContent>
+        </Card>
+
+        <Card className="max-w-md mx-auto mt-4">
+          <CardHeader>
+            <CardTitle>オフライン設定</CardTitle>
+            <CardDescription>PWA・Service Worker の設定</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="sw-toggle">オフラインモードを無効化</Label>
+                <p className="text-xs text-muted-foreground">
+                  共有端末でのセキュリティが気になる場合はオンにしてください
+                </p>
+              </div>
+              <Switch
+                id="sw-toggle"
+                checked={swDisabled}
+                onCheckedChange={(checked) => {
+                  setSwDisabled(checked)
+                  if (checked) {
+                    localStorage.setItem("sw-disabled", "1")
+                    // Unregister existing service workers
+                    if ("serviceWorker" in navigator) {
+                      navigator.serviceWorker.getRegistrations().then((regs) => {
+                        regs.forEach((r) => r.unregister())
+                      })
+                    }
+                    toast.success("オフラインモードを無効化しました")
+                  } else {
+                    localStorage.removeItem("sw-disabled")
+                    // Register service worker
+                    if ("serviceWorker" in navigator) {
+                      navigator.serviceWorker.register("/sw.js").catch(() => {})
+                    }
+                    toast.success("オフラインモードを有効化しました")
+                  }
+                }}
+              />
+            </div>
           </CardContent>
         </Card>
       </div>

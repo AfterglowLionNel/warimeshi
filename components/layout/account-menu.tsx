@@ -1,5 +1,6 @@
 "use client"
 
+import Image from "next/image"
 import Link from "next/link"
 import type { Session } from "next-auth"
 import { Button } from "@/components/ui/button"
@@ -35,10 +36,13 @@ export function AccountMenu({ session }: AccountMenuProps) {
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size="sm" className="gap-2">
           {session.user.image ? (
-            <img
+            <Image
               src={session.user.image}
               alt=""
+              width={20}
+              height={20}
               className="h-5 w-5 rounded-full"
+              unoptimized
             />
           ) : (
             <div className="h-5 w-5 rounded-full bg-primary/10 flex items-center justify-center">

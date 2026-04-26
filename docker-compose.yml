@@ -1,0 +1,33 @@
+# =====================================================
+# 警告: この compose は **ローカル開発専用**。
+# 本番環境では絶対にこの設定を使わないこと。
+#   - DB パスワードがハードコード (warimeshi/warimeshi)
+#   - scripts/docker-init.sh で警告なしに dump を毎回 --clean 復元
+#   - 復元スクリプトが pg_hba.conf を trust に書き換える可能性あり (開発時の利便性のため)
+# 本番は環境変数経由で強パスワードを与え、scram-sha-256 を維持すること。
+# =====================================================
+services:
+  postgres:
+    image: postgres:16
+    container_name: warimeshi-postgres
+    restart: unless-stopped
+    ports:
+      # ホスト側 5433 → コンテナ 5432 (ホスト側 5432 は Windows ネイティブ postgres と衝突するため)
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: warimeshi
+      POSTGRES_PASSWORD: warimeshi
+      POSTGRES_DB: warimeshi
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    volumes:
+      - warimeshi-pgdata:/var/lib/postgresql/data
+      - ./warimeshi.dump:/tmp/warimeshi.dump:ro
+      - ./scripts/docker-init.sh:/docker-entrypoint-initdb.d/00-restore-dump.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U warimeshi -d warimeshi"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  warimeshi-pgdata:

@@ -1,8 +1,21 @@
+import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users, tables, tableMembers } from "@/lib/db/schema";
 import { eq, inArray, desc } from "drizzle-orm";
 import { GroupPageClient } from "@/components/group/group-page-client";
+
+export const metadata: Metadata = {
+  title: "グループ割り勘 | リンク共有・リアルタイム同期",
+  description: "飲み会や旅行のグループで割り勘計算。招待リンクを共有するだけで参加可能。注文をリアルタイムで共有し、誰が何を頼んだか一目で分かる。幹事の負担を軽減。",
+  alternates: {
+    canonical: "https://warimeshi.com/group",
+  },
+  openGraph: {
+    title: "グループ割り勘 | リンク共有・リアルタイム同期",
+    description: "飲み会や旅行のグループで割り勘計算。招待リンクを共有するだけで参加可能。",
+  },
+};
 
 export default async function GroupPage() {
   const session = await auth();

@@ -193,8 +193,7 @@ export function JoinSection() {
               {/* QR Scanner */}
               {isScanning ? (
                 <div className="relative">
-                  {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                  <video
+                      <video
                     ref={videoRef}
                     className="w-full aspect-square object-cover rounded-lg bg-black"
                     autoPlay

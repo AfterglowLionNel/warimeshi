@@ -44,6 +44,8 @@ export interface Order {
   unit_price: number
   quantity: number
   line_total: number
+  is_shared: boolean
+  shared_group_id: string | null
   deleted_at: string | null
   created_at: string
   updated_at: string

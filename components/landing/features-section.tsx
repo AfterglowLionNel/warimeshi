@@ -2,100 +2,119 @@
 
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { User, Users, Car, ArrowRight } from "lucide-react"
+import { User, Users, Car, ChevronRight, ArrowRight } from "lucide-react"
 
 const features = [
   {
     icon: User,
     title: "ソロモード",
-    description: "ログイン不要で、自分の注文だけを素早く記録。データはブラウザに自動保存されるので、いつでも履歴を確認できます。",
-    note: "※ データは端末に保存され、他のデバイスとは共有されません",
+    desc: "ログイン不要。自分の注文を素早く記録。",
     href: "/solo",
-    cta: "ソロモードで始める",
-    variant: "outline" as const,
+    accent: false,
   },
   {
     icon: Users,
     title: "グループモード",
-    description: "招待リンクを共有するだけで、メンバー全員の注文をリアルタイム同期。誰が何を頼んだか一目でわかります。",
-    note: undefined as string | undefined,
+    desc: "招待リンクで全員の注文をリアルタイム同期。",
     href: "/group",
-    cta: "グループで始める",
-    variant: "default" as const,
+    accent: true,
   },
   {
     icon: Car,
     title: "タクシー・代行計算",
-    description: "区間別の料金計算で、途中下車する人がいても公平に割り勘。降りる順番と距離を入力するだけで、各自の支払い額を自動算出します。",
-    note: "他にはない独自の区間別計算システム",
+    desc: "区間別の料金計算。途中下車も公平に。",
     href: "/taxi",
-    cta: "計算ツールを開く",
-    variant: "default" as const,
-    highlight: true,
+    accent: false,
+    tag: "独自機能",
   },
-]
+] as const
 
 export function FeaturesSection() {
   return (
-    <section className="py-16 sm:py-24">
-      <div className="container mx-auto px-4">
-        <div className="text-center mb-12 sm:mb-16">
-          <h2 className="text-2xl sm:text-3xl font-bold text-foreground mb-3">
-            3つのモードで、あらゆる場面に対応
-          </h2>
-          <p className="text-muted-foreground max-w-lg mx-auto">
-            シーンに合わせて最適なモードを選べます
-          </p>
+    <section className="py-12 sm:py-16">
+      <div className="container mx-auto px-5">
+        <div className="max-w-md mx-auto md:max-w-2xl">
+          <div className="mb-3 text-[11px] font-bold tracking-[.12em] text-[var(--wm-ink-3)]">
+            3つのモード
+          </div>
+
+          <div className="space-y-2.5">
+            {features.map((f) => (
+              <Link
+                key={f.title}
+                href={f.href}
+                className="wm-card flex items-start gap-3 p-4 transition hover:border-primary/40 hover:shadow-md"
+              >
+                <span
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[11px]"
+                  style={{
+                    background: f.accent ? "var(--wm-accent-soft)" : "var(--wm-surface)",
+                    color: f.accent ? "var(--wm-accent)" : "var(--wm-ink)",
+                  }}
+                >
+                  <f.icon className="h-5 w-5" />
+                </span>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[15px] font-semibold leading-tight">{f.title}</span>
+                    {"tag" in f && f.tag && (
+                      <span className="wm-chip wm-chip-accent" style={{ fontSize: 10, padding: "2px 7px" }}>
+                        {f.tag}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 text-[13px] leading-relaxed text-[var(--wm-ink-2)]">
+                    {f.desc}
+                  </div>
+                </div>
+                <ChevronRight className="h-4 w-4 self-center text-[var(--wm-ink-3)]" />
+              </Link>
+            ))}
+          </div>
         </div>
 
-        <div className="grid gap-6 sm:gap-8 md:grid-cols-3 max-w-5xl mx-auto">
-          {features.map((feature) => (
-            <div
-              key={feature.title}
-              className={`group relative flex flex-col p-6 sm:p-8 rounded-2xl border bg-card transition-all hover:border-primary/50 hover:shadow-lg ${
-                "highlight" in feature && feature.highlight ? "border-primary/30 ring-1 ring-primary/20" : ""
-              }`}
-            >
-              {"highlight" in feature && feature.highlight && (
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                  <span className="px-3 py-1 text-xs font-medium bg-primary text-primary-foreground rounded-full">
-                    独自機能
-                  </span>
-                </div>
-              )}
-              <div className="mb-4">
-                <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10 text-primary">
-                  <feature.icon className="h-6 w-6" />
-                </div>
-              </div>
+        {/* 黒地 CTA */}
+        <div className="max-w-md mx-auto md:max-w-2xl mt-10">
+          <div
+            className="rounded-2xl p-7"
+            style={{ background: "var(--wm-ink)", color: "#fff" }}
+          >
+            <div className="text-[11px] font-bold tracking-[.1em] opacity-50">READY?</div>
+            <h3 className="mt-1.5 mb-4 text-2xl font-bold leading-snug">
+              次の飲み会から
+              <br />
+              使ってみませんか
+            </h3>
+            <Button asChild size="lg" className="w-full">
+              <Link href="/group">
+                無料で始める
+                <ArrowRight className="ml-1 h-4 w-4" />
+              </Link>
+            </Button>
+          </div>
+        </div>
 
-              <h3 className="text-xl font-semibold text-foreground mb-2">
-                {feature.title}
-              </h3>
-
-              <div className="flex-grow mb-6">
-                <p className="text-muted-foreground text-sm leading-relaxed">
-                  {feature.description}
-                </p>
-                {"note" in feature && feature.note && (
-                  <p className={`text-xs mt-2 ${
-                    "highlight" in feature && feature.highlight
-                      ? "text-primary font-medium"
-                      : "text-muted-foreground/70"
-                  }`}>
-                    {feature.note}
-                  </p>
-                )}
-              </div>
-
-              <Button asChild variant={feature.variant} className="w-full group-hover:translate-x-0">
-                <Link href={feature.href}>
-                  {feature.cta}
-                  <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
-                </Link>
-              </Button>
-            </div>
-          ))}
+        {/* SEO 詳細 */}
+        <div className="max-w-2xl mx-auto mt-12 text-[var(--wm-ink-2)]">
+          <h2 className="mb-4 text-center text-lg font-semibold text-foreground">
+            warimeshiが選ばれる理由
+          </h2>
+          <div className="space-y-3 text-sm leading-relaxed">
+            <p>
+              <strong>飲み会の割り勘計算</strong>で困ったことはありませんか？
+              「誰が何を頼んだか分からなくなった」「端数の処理が面倒」「後から精算を確認したい」
+              warimeshi はこれらをすべて解決します。
+            </p>
+            <p>
+              <strong>グループ共有機能</strong>では、招待リンクを共有するだけで全員が参加可能。
+              各自がスマートフォンから注文を入力でき、リアルタイムで全員の画面に反映されます。
+              幹事が一人で全員の注文を管理する必要はありません。
+            </p>
+            <p>
+              <strong>タクシー割り勘計算</strong>は、warimeshi ならではの機能です。
+              「途中で降りる人がいる」「初乗りをどう分けるか」といった複雑な計算も区間入力だけで公平に算出。
+            </p>
+          </div>
         </div>
       </div>
     </section>

@@ -5,6 +5,18 @@ import { users, tables, tableMembers } from "@/lib/db/schema";
 import { eq, inArray, desc } from "drizzle-orm";
 import { generateInviteToken } from "@/lib/utils/format";
 import { resolveUserIdFromGuestToken } from "@/lib/auth/permissions";
+import bcrypt from "bcryptjs";
+import { z } from "zod";
+
+const createTableSchema = z
+  .object({
+    tableName: z.string().trim().min(1).max(100),
+    // ISO 8601 形式の日時文字列
+    eventDate: z.string().datetime({ offset: true }).or(z.string().min(8).max(40)),
+    displayName: z.string().trim().min(1).max(50),
+    usePassword: z.boolean().optional().default(false),
+  })
+  .strict();
 
 async function resolveUserId(request: Request): Promise<{ userId: string | null; isGuest: boolean }> {
   const session = await auth();
@@ -40,23 +52,41 @@ async function resolveUserId(request: Request): Promise<{ userId: string | null;
   return { userId: null, isGuest: false };
 }
 
-function generateInvitePassword(): string {
+function generateInvitePassword(length = 8): string {
+  // 紛らわしい文字 (I, L, O, 0, 1) を除外
   const letters = "ABCDEFGHJKMNPQRSTUVWXYZ";
   const digits = "23456789";
   const all = letters + digits;
 
-  // Ensure at least one letter and one digit
-  let password = "";
-  password += letters[Math.floor(Math.random() * letters.length)];
-  password += digits[Math.floor(Math.random() * digits.length)];
+  if (length < 4) throw new Error("Password length must be >= 4");
 
-  // Fill remaining 2 characters
-  for (let i = 0; i < 2; i++) {
-    password += all[Math.floor(Math.random() * all.length)];
+  // CSPRNG でインデックスを引く (modulo bias を避けるため十分な範囲を引いてから余りを取る)
+  const pickIndex = (max: number): number => {
+    const buf = new Uint32Array(1);
+    const limit = Math.floor(0xffffffff / max) * max;
+    let value: number;
+    do {
+      crypto.getRandomValues(buf);
+      value = buf[0];
+    } while (value >= limit);
+    return value % max;
+  };
+
+  const chars: string[] = [];
+  // 最低 1 文字ずつ英字と数字を保証
+  chars.push(letters[pickIndex(letters.length)]);
+  chars.push(digits[pickIndex(digits.length)]);
+  for (let i = chars.length; i < length; i++) {
+    chars.push(all[pickIndex(all.length)]);
   }
 
-  // Shuffle the characters
-  return password.split("").sort(() => Math.random() - 0.5).join("");
+  // Fisher-Yates シャッフル (CSPRNG)
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = pickIndex(i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+
+  return chars.join("");
 }
 
 export async function POST(request: Request) {
@@ -66,29 +96,40 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await request.json().catch(() => null);
-  const tableName = body?.tableName as string | undefined;
-  const eventDate = body?.eventDate as string | undefined;
-  const displayName = body?.displayName as string | undefined;
-  const usePassword = body?.usePassword === true;
+  const rawBody = await request.json().catch(() => null);
+  const parsed = createTableSchema.safeParse(rawBody);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "リクエストの内容が不正です", details: parsed.error.issues.map((i) => i.message) },
+      { status: 400 },
+    );
+  }
+  const { tableName, eventDate, displayName, usePassword } = parsed.data;
 
-  if (!tableName || !eventDate || !displayName) {
-    return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+  // eventDate を Date に変換 (Invalid Date を弾く)
+  const eventDateObj = new Date(eventDate);
+  if (Number.isNaN(eventDateObj.getTime())) {
+    return NextResponse.json({ error: "eventDate が不正な日付です" }, { status: 400 });
   }
 
   const inviteToken = generateInviteToken();
   const autoLockAt = new Date(Date.now() + 12 * 60 * 60 * 1000);
-  const invitePassword = usePassword ? generateInvitePassword() : null;
+  // 招待トークンの有効期限（デフォルト7日間）
+  const inviteTokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const plainPassword = usePassword ? generateInvitePassword() : null;
+  // ハッシュ化して保存（大文字変換後にハッシュ化）
+  const hashedPassword = plainPassword ? await bcrypt.hash(plainPassword.toUpperCase(), 10) : null;
 
   try {
     const [newTable] = await db
       .insert(tables)
       .values({
         ownerUserId: userId,
-        name: tableName.trim(),
-        eventDate: new Date(eventDate),
+        name: tableName,
+        eventDate: eventDateObj,
         inviteToken,
-        invitePassword,
+        inviteTokenExpiresAt,
+        invitePassword: hashedPassword,
         autoLockAt,
       })
       .returning();
@@ -100,12 +141,12 @@ export async function POST(request: Request) {
     await db.insert(tableMembers).values({
       tableId: newTable.id,
       userId: userId,
-      displayName: displayName.trim(),
+      displayName,
       isMaster: true,
       isGuest: isGuest,
     });
 
-    return NextResponse.json({ success: true, inviteToken });
+    return NextResponse.json({ success: true, inviteToken, invitePassword: plainPassword });
   } catch (error) {
     console.error("Table creation error:", error);
     return NextResponse.json({ error: "Failed to create table" }, { status: 400 });

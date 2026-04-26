@@ -2,17 +2,32 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users, tables, orders, tableMembers } from "@/lib/db/schema";
-import { eq, and, isNull, desc } from "drizzle-orm";
+import { eq, and, isNull, desc, inArray } from "drizzle-orm";
 import { resolveUserIdFromGuestToken } from "@/lib/auth/permissions";
+import { tableEvents } from "@/lib/events/table-events";
+import { randomUUID } from "crypto";
+import { z } from "zod";
 
-type OrderInsertPayload = {
-  table_id: string;
-  member_id: string;
-  item_name: string | null;
-  unit_price: number;
-  quantity: number;
-  line_total: number;
-};
+// 入力検証: ad-hoc な Number(...) を避け、数値範囲・文字列長を Zod で固める。
+const orderInsertSchema = z
+  .object({
+    table_id: z.string().uuid(),
+    member_id: z.string().uuid(),
+    member_ids: z.array(z.string().uuid()).max(100).optional(),
+    item_name: z.string().trim().max(200).nullable().optional().transform((v) => v ?? null),
+    unit_price: z.number().finite().min(0).max(10_000_000),
+    quantity: z.number().int().min(1).max(10_000),
+    line_total: z.number().finite().min(0).max(100_000_000),
+    shared_group_id: z.string().uuid().optional(),
+    is_shared: z.boolean().optional(),
+  })
+  .strict();
+
+const ordersBodySchema = z.object({
+  orders: z.array(orderInsertSchema).min(1).max(50),
+});
+
+type OrderInsertPayload = z.infer<typeof orderInsertSchema>;
 
 async function resolveUserId(request: Request): Promise<{ userId: string | null; isGuest: boolean }> {
   const session = await auth();
@@ -64,12 +79,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await request.json().catch(() => null);
-  const ordersList = body?.orders as OrderInsertPayload[] | undefined;
-
-  if (!ordersList || !Array.isArray(ordersList) || ordersList.length === 0) {
-    return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+  const rawBody = await request.json().catch(() => null);
+  const parsed = ordersBodySchema.safeParse(rawBody);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "リクエストの内容が不正です", details: parsed.error.issues.map((i) => i.message) },
+      { status: 400 },
+    );
   }
+  const ordersList: OrderInsertPayload[] = parsed.data.orders;
 
   const tableId = ordersList[0]?.table_id;
   if (!tableId || ordersList.some((o) => o.table_id !== tableId)) {
@@ -93,18 +111,64 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "このテーブルのメンバーではありません" }, { status: 403 });
   }
 
+  // 全ての member_id / member_ids が同じテーブルに属していることを保証する。
+  // これがないと、自分のメンバーで注文しているふりをして、他テーブルのメンバーに送金が回る。
+  const referencedMemberIds = Array.from(
+    new Set(
+      ordersList.flatMap((o) => [o.member_id, ...(o.member_ids ?? [])]).filter(Boolean),
+    ),
+  );
+  if (referencedMemberIds.length > 0) {
+    const membersInTable = await db
+      .select({ id: tableMembers.id })
+      .from(tableMembers)
+      .where(and(eq(tableMembers.tableId, tableId), inArray(tableMembers.id, referencedMemberIds)));
+    if (membersInTable.length !== referencedMemberIds.length) {
+      return NextResponse.json(
+        { error: "指定されたメンバーの一部はこのテーブルに存在しません" },
+        { status: 400 },
+      );
+    }
+  }
+
   try {
-    const ordersToInsert = ordersList.map((order) => ({
+    // Expand orders with member_ids into individual orders with shared_group_id
+    const expandedOrders: OrderInsertPayload[] = [];
+    for (const order of ordersList) {
+      if (order.member_ids && order.member_ids.length > 1) {
+        const groupId = randomUUID();
+        const perPerson = Math.floor(order.line_total / order.member_ids.length);
+        const remainder = order.line_total - perPerson * order.member_ids.length;
+        for (let i = 0; i < order.member_ids.length; i++) {
+          expandedOrders.push({
+            ...order,
+            member_id: order.member_ids[i],
+            line_total: perPerson + (i < remainder ? 1 : 0),
+            unit_price: perPerson + (i < remainder ? 1 : 0),
+            quantity: 1,
+            shared_group_id: groupId,
+          });
+        }
+      } else {
+        expandedOrders.push(order);
+      }
+    }
+
+    const ordersToInsert = expandedOrders.map((order) => ({
       tableId: order.table_id,
       memberId: order.member_id,
       itemName: order.item_name,
       unitPrice: order.unit_price,
       quantity: order.quantity,
       lineTotal: order.line_total,
+      isShared: (order as { is_shared?: boolean }).is_shared ?? false,
+      sharedGroupId: order.shared_group_id ?? null,
       createdByUserId: userId,
     }));
 
     const insertedOrders = await db.insert(orders).values(ordersToInsert).returning();
+
+    tableEvents.emitTableEvent(tableId, "order:created", { count: insertedOrders.length });
 
     return NextResponse.json({ success: true, data: insertedOrders });
   } catch (error) {
@@ -157,6 +221,8 @@ export async function GET(request: Request) {
         unitPrice: orders.unitPrice,
         quantity: orders.quantity,
         lineTotal: orders.lineTotal,
+        isShared: orders.isShared,
+        sharedGroupId: orders.sharedGroupId,
         deletedAt: orders.deletedAt,
         createdAt: orders.createdAt,
         updatedAt: orders.updatedAt,

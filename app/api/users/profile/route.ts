@@ -26,10 +26,11 @@ export async function PATCH(request: Request) {
         nickname: nickname.trim() || null,
         updatedAt: new Date(),
       })
-      .where(eq(users.id, session.user.id));
+      .where(eq(users.id, session.user.id))
+      .returning({ id: users.id });
 
     // If no rows updated and we have email, try by email
-    if (result.rowCount === 0 && session.user.email) {
+    if (result.length === 0 && session.user.email) {
       await db
         .update(users)
         .set({

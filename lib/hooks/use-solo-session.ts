@@ -113,6 +113,15 @@ export function useSoloSession(sessionId: string) {
     [session, saveSession],
   )
 
+  // Update memo
+  const updateMemo = useCallback(
+    (memo: string) => {
+      if (!session) return
+      saveSession({ ...session, memo })
+    },
+    [session, saveSession],
+  )
+
   return {
     session,
     isLoading,
@@ -121,6 +130,7 @@ export function useSoloSession(sessionId: string) {
     deleteOrder,
     clearAllOrders,
     updateSessionName,
+    updateMemo,
   }
 }
 

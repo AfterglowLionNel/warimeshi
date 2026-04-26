@@ -103,7 +103,10 @@ export function JoinTablePageClient({ table, token, memberCount = 0, ownerName =
     checkAuth();
   }, [table, token, router]);
 
-  if (error === "invalid_invite" || !table) {
+  if (error === "invalid_invite" || error === "invite_expired" || !table) {
+    const errorMessage = error === "invite_expired"
+      ? "この招待リンクは有効期限切れです"
+      : "無効な招待リンクです";
     return (
       <main className="min-h-screen flex flex-col">
         <header className="border-b bg-card">
@@ -122,7 +125,7 @@ export function JoinTablePageClient({ table, token, memberCount = 0, ownerName =
         <div className="flex-1 container mx-auto px-4 py-8">
           <Card className="max-w-md mx-auto">
             <CardContent className="py-12 text-center">
-              <p className="text-muted-foreground mb-4">無効な招待リンクです</p>
+              <p className="text-muted-foreground mb-4">{errorMessage}</p>
               <Button asChild>
                 <Link href="/group">グループ一覧へ</Link>
               </Button>

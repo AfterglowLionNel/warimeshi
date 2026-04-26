@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { CalculationMode, FareSettings, Modifier, Segment, VehicleType } from "@/lib/types/taxi"
 import { formatCurrency } from "@/lib/utils/format"
 import { Button } from "@/components/ui/button"
@@ -53,9 +53,9 @@ type PassengerShare = {
 }
 
 export function TaxiCalculator({
-  showBackLink = true,
-  backLinkHref = "/",
-  backLinkText = "トップに戻る",
+  showBackLink: _showBackLink = true,
+  backLinkHref: _backLinkHref = "/",
+  backLinkText: _backLinkText = "トップに戻る",
   tableId,
   currentUserId,
 }: TaxiCalculatorProps) {
@@ -70,13 +70,13 @@ export function TaxiCalculator({
   const [sameDistance, setSameDistance] = useState("")
   const [samePersonCount, setSamePersonCount] = useState("1")
   const [segments, setSegments] = useState<Segment[]>([{ id: "1", name: "", distanceKm: 0, dropCount: 1 }])
-  const [isSaving, setIsSaving] = useState(false)
+  const [_isSaving, setIsSaving] = useState(false)
   const [showLongDistanceSettings, setShowLongDistanceSettings] = useState(vehicleType === "daiko")
   const [expandedSegments, setExpandedSegments] = useState<Set<string>>(new Set())
   const lastSavedHash = useRef<string | null>(null)
   const lastRemoteCreatedAt = useRef<string | null>(null)
 
-  const applyRecord = (data: any) => {
+  const applyRecord = useCallback((data: Record<string, unknown>) => {
     const savedSettings = (data.settings || {}) as FareSettings
     if (data.vehicle_type === "daiko") {
       setVehicleType("daiko")
@@ -86,16 +86,16 @@ export function TaxiCalculator({
       setTaxiSettings({ ...DEFAULT_TAXI_SETTINGS, ...savedSettings })
     }
     if (data.input) {
-      const input = data.input as any
-      setSameDistance(input.sameDistance ?? "")
-      setSamePersonCount(input.samePersonCount ?? "1")
+      const input = data.input as Record<string, unknown>
+      setSameDistance((input.sameDistance as string) ?? "")
+      setSamePersonCount((input.samePersonCount as string) ?? "1")
       // 後方互換: dropCountがないセグメントにはデフォルト1を設定
-      const savedSegments = (input.segments ?? [{ id: "1", name: "", distanceKm: 0, dropCount: 1 }]) as Segment[]
+      const savedSegments = ((input.segments as Segment[]) ?? [{ id: "1", name: "", distanceKm: 0, dropCount: 1 }])
       setSegments(savedSegments.map((s: Segment) => ({ ...s, dropCount: s.dropCount ?? 1 })))
-      setMode(input.mode ?? "same")
+      setMode((input.mode as CalculationMode) ?? "same")
     }
     if (data.created_at) {
-      lastRemoteCreatedAt.current = data.created_at
+      lastRemoteCreatedAt.current = data.created_at as string
     }
     try {
       lastSavedHash.current = JSON.stringify({
@@ -109,24 +109,24 @@ export function TaxiCalculator({
     } catch {
       lastSavedHash.current = null
     }
-  }
+  }, [tableId])
 
-  const fetchLatestRecord = async () => {
+  const fetchLatestRecord = useCallback(async () => {
     if (!tableId) return
     const res = await fetch(`/api/taxi-records?tableId=${tableId}`)
     if (!res.ok) return
-    const json = (await res.json()) as { data?: any }
+    const json = (await res.json()) as { data?: Record<string, unknown> }
     const data = json.data
     if (!data) return
-    if (lastRemoteCreatedAt.current && data.created_at <= lastRemoteCreatedAt.current) return
+    if (lastRemoteCreatedAt.current && (data.created_at as string) <= lastRemoteCreatedAt.current) return
     applyRecord(data)
-  }
+  }, [tableId, applyRecord])
 
   useEffect(() => {
     void fetchLatestRecord()
     const interval = setInterval(fetchLatestRecord, 5000)
     return () => clearInterval(interval)
-  }, [tableId])
+  }, [fetchLatestRecord])
 
   const updateSetting = (key: keyof FareSettings, raw: string, parser: (v: string) => number) => {
     const parsed = raw === "" ? Number.NaN : parser(raw)
@@ -166,34 +166,6 @@ export function TaxiCalculator({
     (hasLongDistance && settings.extraFromKm !== undefined && !Number.isNaN(settings.extraFromKm) &&
       settings.extraFromKm < (settings.baseKm || 0))
 
-  const calculateBaseFare = (distanceKm: number) => {
-    if (distanceKm <= 0) return 0
-    let fare = (settings.basePrice || 0) + (settings.pickupFee || 0)
-    if (distanceKm > (settings.baseKm || 0)) {
-      const remainingKm = distanceKm - (settings.baseKm || 0)
-      // Apply long-distance tier if settings exist (unified for both taxi and daiko)
-      if (settings.extraFromKm && settings.extraPerKm && distanceKm > settings.extraFromKm) {
-        const normalKm = settings.extraFromKm - (settings.baseKm || 0)
-        const extraKm = distanceKm - settings.extraFromKm
-        fare += normalKm * (settings.perKmPrice || 0) + extraKm * ((settings.perKmPrice || 0) + settings.extraPerKm)
-      } else {
-        fare += remainingKm * (settings.perKmPrice || 0)
-      }
-    }
-    return fare
-  }
-
-  const applyModifiers = (baseFare: number) => {
-    let fare = baseFare
-    for (const mod of modifiers) {
-      if (!mod.enabled) continue
-      // %の丸めは切り捨て（1円未満切り捨て）
-      const adjustment = mod.type === "fixed" ? mod.amount : Math.floor(baseFare * (mod.amount / 100))
-      fare = mod.direction === "add" ? fare + adjustment : fare - adjustment
-    }
-    return Math.max(0, Math.round(fare))
-  }
-
   const results = useMemo<
     | { mode: "same"; totalDistance: number; totalFare: number; perPerson: number; personCount: number; remainder: number; pickupPerPerson: number }
     | {
@@ -208,6 +180,33 @@ export function TaxiCalculator({
       }
     | null
   >(() => {
+    // Helper functions moved inside useMemo to satisfy exhaustive-deps
+    const calculateBaseFare = (distanceKm: number) => {
+      if (distanceKm <= 0) return 0
+      let fare = (settings.basePrice || 0) + (settings.pickupFee || 0)
+      if (distanceKm > (settings.baseKm || 0)) {
+        const remainingKm = distanceKm - (settings.baseKm || 0)
+        if (settings.extraFromKm && settings.extraPerKm && distanceKm > settings.extraFromKm) {
+          const normalKm = settings.extraFromKm - (settings.baseKm || 0)
+          const extraKm = distanceKm - settings.extraFromKm
+          fare += normalKm * (settings.perKmPrice || 0) + extraKm * ((settings.perKmPrice || 0) + settings.extraPerKm)
+        } else {
+          fare += remainingKm * (settings.perKmPrice || 0)
+        }
+      }
+      return fare
+    }
+
+    const applyModifiers = (baseFare: number) => {
+      let fare = baseFare
+      for (const mod of modifiers) {
+        if (!mod.enabled) continue
+        const adjustment = mod.type === "fixed" ? mod.amount : Math.floor(baseFare * (mod.amount / 100))
+        fare = mod.direction === "add" ? fare + adjustment : fare - adjustment
+      }
+      return Math.max(0, Math.round(fare))
+    }
+
     if (settingsInvalid) return null
 
     const pickupFee = settings.pickupFee || 0
@@ -366,129 +365,147 @@ export function TaxiCalculator({
 
   return (
     <div className="space-y-4">
-      <Tabs value={vehicleType} onValueChange={(v) => setVehicleType(v as VehicleType)}>
-        <TabsList className="w-full">
-          <TabsTrigger value="taxi" className="flex-1">
-            <Car className="h-4 w-4 mr-2" />
-            タクシー
-          </TabsTrigger>
-          <TabsTrigger value="daiko" className="flex-1">
-            <Truck className="h-4 w-4 mr-2" />
-            運転代行
-          </TabsTrigger>
-        </TabsList>
+      {/* 車種切替 wm-tabs */}
+      <div className="wm-tabs">
+        <button
+          type="button"
+          className={`wm-tab ${vehicleType === "taxi" ? "is-active" : ""}`}
+          onClick={() => setVehicleType("taxi")}
+        >
+          <Car className="mr-1.5 inline-block h-3.5 w-3.5" />
+          タクシー
+        </button>
+        <button
+          type="button"
+          className={`wm-tab ${vehicleType === "daiko" ? "is-active" : ""}`}
+          onClick={() => setVehicleType("daiko")}
+        >
+          <Truck className="mr-1.5 inline-block h-3.5 w-3.5" />
+          運転代行
+        </button>
+      </div>
 
-        <TabsContent value={vehicleType} className="mt-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">料金設定</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-sm">初乗り距離 (km)</Label>
-                  <Input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    value={Number.isNaN(settings.baseKm) ? "" : settings.baseKm}
-                    onChange={(e) => updateSetting("baseKm", e.target.value, Number.parseFloat)}
-                  />
-                </div>
-                <div>
-                  <Label className="text-sm">初乗り料金</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    value={Number.isNaN(settings.basePrice) ? "" : settings.basePrice}
-                    onChange={(e) => updateSetting("basePrice", e.target.value, Number.parseInt)}
-                  />
-                </div>
-                <div>
-                  <Label className="text-sm">加算距離単価 (/km)</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    value={Number.isNaN(settings.perKmPrice) ? "" : settings.perKmPrice}
-                    onChange={(e) => updateSetting("perKmPrice", e.target.value, Number.parseInt)}
-                  />
-                </div>
-                <div>
-                  <Label className="text-sm">迎車料金</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    value={Number.isNaN(settings.pickupFee) ? "" : settings.pickupFee}
-                    onChange={(e) => updateSetting("pickupFee", e.target.value, Number.parseInt)}
-                  />
-                </div>
-              </div>
-
-              <Collapsible open={showLongDistanceSettings} onOpenChange={setShowLongDistanceSettings}>
-                <CollapsibleTrigger asChild>
-                  <Button variant="ghost" size="sm" className="w-full justify-between">
-                    長距離割増設定
-                    <ChevronDown className={`h-4 w-4 transition-transform ${showLongDistanceSettings ? "rotate-180" : ""}`} />
-                  </Button>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="pt-2">
-                  <div className="grid grid-cols-2 gap-3 p-3 bg-muted/50 rounded-lg">
-                    <div>
-                      <Label className="text-sm">長距離閾値 (km)</Label>
-                      <Input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        placeholder={vehicleType === "daiko" ? "10" : "未設定"}
-                        value={Number.isNaN(settings.extraFromKm ?? Number.NaN) ? "" : settings.extraFromKm}
-                        onChange={(e) => updateSetting("extraFromKm", e.target.value, Number.parseFloat)}
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-sm">追加単価 (/km)</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        placeholder={vehicleType === "daiko" ? "100" : "未設定"}
-                        value={Number.isNaN(settings.extraPerKm ?? Number.NaN) ? "" : settings.extraPerKm}
-                        onChange={(e) => updateSetting("extraPerKm", e.target.value, Number.parseInt)}
-                      />
-                    </div>
-                    <p className="col-span-2 text-xs text-muted-foreground">
-                      設定した距離を超えると、追加単価が加算単価に上乗せされます
-                    </p>
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
-              {settingsInvalid && (
-                <p className="text-sm text-destructive">
-                  {(settings.baseKm === undefined || Number.isNaN(settings.baseKm) || settings.baseKm <= 0)
-                    ? "初乗り距離は0より大きい値を入力してください。"
-                    : hasLongDistance && settings.extraFromKm !== undefined && !Number.isNaN(settings.extraFromKm) && settings.extraFromKm < (settings.baseKm || 0)
-                    ? "長距離閾値は初乗り距離以上に設定してください。"
-                    : "0以上の値をすべて入力してください。"}
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base">割増・割引オプション</CardTitle>
-            <Button variant="outline" size="sm" onClick={addModifier}>
-              <Plus className="h-4 w-4 mr-1" />
-              追加
-            </Button>
+      {/* 料金設定 */}
+      <div className="wm-card p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="wm-h3 text-[14px] font-semibold">料金設定</h3>
+          <span className="wm-meta">{vehicleType === "taxi" ? "タクシー" : "運転代行"}</span>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">
+              初乗り距離 (km)
+            </Label>
+            <Input
+              type="number"
+              step="0.1"
+              min="0"
+              className="wm-num mt-1"
+              value={Number.isNaN(settings.baseKm) ? "" : settings.baseKm}
+              onChange={(e) => updateSetting("baseKm", e.target.value, Number.parseFloat)}
+            />
           </div>
-        </CardHeader>
-        <CardContent>
+          <div>
+            <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">初乗り料金</Label>
+            <Input
+              type="number"
+              min="0"
+              className="wm-num mt-1"
+              value={Number.isNaN(settings.basePrice) ? "" : settings.basePrice}
+              onChange={(e) => updateSetting("basePrice", e.target.value, Number.parseInt)}
+            />
+          </div>
+          <div>
+            <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">
+              加算単価 (/km)
+            </Label>
+            <Input
+              type="number"
+              min="0"
+              className="wm-num mt-1"
+              value={Number.isNaN(settings.perKmPrice) ? "" : settings.perKmPrice}
+              onChange={(e) => updateSetting("perKmPrice", e.target.value, Number.parseInt)}
+            />
+          </div>
+          <div>
+            <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">迎車料金</Label>
+            <Input
+              type="number"
+              min="0"
+              className="wm-num mt-1"
+              value={Number.isNaN(settings.pickupFee) ? "" : settings.pickupFee}
+              onChange={(e) => updateSetting("pickupFee", e.target.value, Number.parseInt)}
+            />
+          </div>
+        </div>
+
+        <Collapsible open={showLongDistanceSettings} onOpenChange={setShowLongDistanceSettings}>
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" size="sm" className="w-full justify-between text-[13px]">
+              長距離割増設定
+              <ChevronDown className={`h-4 w-4 transition-transform ${showLongDistanceSettings ? "rotate-180" : ""}`} />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="pt-2">
+            <div className="grid grid-cols-2 gap-3 rounded-[12px] bg-[var(--wm-surface)] p-3">
+              <div>
+                <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">
+                  長距離閾値 (km)
+                </Label>
+                <Input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  className="wm-num mt-1 bg-card"
+                  placeholder={vehicleType === "daiko" ? "10" : "未設定"}
+                  value={Number.isNaN(settings.extraFromKm ?? Number.NaN) ? "" : settings.extraFromKm}
+                  onChange={(e) => updateSetting("extraFromKm", e.target.value, Number.parseFloat)}
+                />
+              </div>
+              <div>
+                <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">
+                  追加単価 (/km)
+                </Label>
+                <Input
+                  type="number"
+                  min="0"
+                  className="wm-num mt-1 bg-card"
+                  placeholder={vehicleType === "daiko" ? "100" : "未設定"}
+                  value={Number.isNaN(settings.extraPerKm ?? Number.NaN) ? "" : settings.extraPerKm}
+                  onChange={(e) => updateSetting("extraPerKm", e.target.value, Number.parseInt)}
+                />
+              </div>
+              <p className="col-span-2 text-[11px] text-[var(--wm-ink-3)]">
+                閾値を超えた距離分に追加単価が上乗せされます
+              </p>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+        {settingsInvalid && (
+          <p className="text-[12px] text-destructive">
+            {(settings.baseKm === undefined || Number.isNaN(settings.baseKm) || settings.baseKm <= 0)
+              ? "初乗り距離は0より大きい値を入力してください。"
+              : hasLongDistance && settings.extraFromKm !== undefined && !Number.isNaN(settings.extraFromKm) && settings.extraFromKm < (settings.baseKm || 0)
+              ? "長距離閾値は初乗り距離以上に設定してください。"
+              : "0以上の値をすべて入力してください。"}
+          </p>
+        )}
+      </div>
+
+      {/* 割増・割引オプション */}
+      <div className="wm-card p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="wm-h3 text-[14px] font-semibold">割増・割引</h3>
+          <Button variant="outline" size="sm" onClick={addModifier} className="bg-card">
+            <Plus className="mr-1 h-4 w-4" />
+            追加
+          </Button>
+        </div>
+        <div>
           {modifiers.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">オプションはありません</p>
+            <p className="text-center text-[12px] text-[var(--wm-ink-3)] py-4">オプションはありません</p>
           ) : (<>
-            <p className="text-xs text-muted-foreground mb-2">※ %は基本運賃（距離料金+迎車料金）に対して適用されます（切り捨て）</p>
+            <p className="mb-2 text-[11px] text-[var(--wm-ink-3)]">※ % は基本運賃 (距離料金 + 迎車料金) に対して適用 (切り捨て)</p>
             <div className="space-y-3">
               {modifiers.map((mod) => (
                 <div
@@ -561,250 +578,303 @@ export function TaxiCalculator({
               ))}
             </div>
           </>)}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Calculator className="h-4 w-4" />
-            距離入力
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Tabs value={mode} onValueChange={(v) => setMode(v as CalculationMode)}>
-            <TabsList className="w-full mb-4">
-              <TabsTrigger value="same" className="flex-1">
-                全員同じ距離
-              </TabsTrigger>
-              <TabsTrigger value="segments" className="flex-1">
-                区間別
-              </TabsTrigger>
-            </TabsList>
+      {/* 距離入力 */}
+      <div className="wm-card p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Calculator className="h-4 w-4 text-[var(--wm-ink-2)]" />
+          <h3 className="wm-h3 text-[14px] font-semibold">距離入力</h3>
+        </div>
 
-            <TabsContent value="same" className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-sm">距離 (km)</Label>
-                  <Input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    placeholder="5.0"
-                    value={sameDistance}
-                    onChange={(e) => setSameDistance(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <Label className="text-sm">人数</Label>
-                  <Input type="number" min="1" value={samePersonCount} onChange={(e) => setSamePersonCount(e.target.value)} />
-                </div>
-              </div>
-            </TabsContent>
+        <div className="wm-tabs">
+          <button
+            type="button"
+            className={`wm-tab ${mode === "same" ? "is-active" : ""}`}
+            onClick={() => setMode("same")}
+          >
+            全員同じ距離
+          </button>
+          <button
+            type="button"
+            className={`wm-tab ${mode === "segments" ? "is-active" : ""}`}
+            onClick={() => setMode("segments")}
+          >
+            区間別
+          </button>
+        </div>
 
-            <TabsContent value="segments" className="space-y-4">
-              <div className="p-3 bg-muted/50 rounded-lg space-y-2">
-                <p className="text-sm font-medium">入力方法</p>
-                <p className="text-sm text-muted-foreground">
-                  降車順に、各区間の距離と降車人数を入力してください。
-                </p>
-                <div className="text-xs text-muted-foreground bg-background/50 p-2 rounded">
-                  <p className="font-medium mb-1">例: A→B→Cの順に降りる（Bは2人同時）</p>
-                  <p>「A降車: 3km / 1人」→「B降車: 2km / 2人」→「C降車: 1km / 1人」</p>
-                  <p className="mt-1">距離料金は乗車中の人数で按分、迎車料金は全員で均等分割されます。</p>
-                </div>
-              </div>
-              <div className="space-y-2">
-                {segments.map((seg, index) => (
-                  <div key={seg.id} className="flex items-center gap-2">
-                    <span className="text-sm text-muted-foreground w-6">{index + 1}.</span>
-                    <Input
-                      placeholder="降りる人・地点"
-                      className="flex-1 h-9"
-                      value={seg.name}
-                      onChange={(e) => updateSegment(seg.id, { name: e.target.value })}
-                    />
-                    <Input
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      placeholder="km"
-                      className="w-20 h-9"
-                      value={seg.distanceKm || ""}
-                      onChange={(e) =>
-                        updateSegment(seg.id, { distanceKm: e.target.value === "" ? 0 : Number.parseFloat(e.target.value) })
-                      }
-                    />
-                    <Input
-                      type="number"
-                      min="1"
-                      placeholder="人"
-                      className="w-16 h-9"
-                      value={seg.dropCount || 1}
-                      onChange={(e) =>
-                        updateSegment(seg.id, { dropCount: Math.max(1, Number.parseInt(e.target.value, 10) || 1) })
-                      }
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9"
-                      onClick={() => removeSegment(seg.id)}
-                      disabled={segments.length === 1}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-              <Button variant="outline" size="sm" onClick={addSegment}>
-                <Plus className="h-4 w-4 mr-1" />
-                区間を追加
-              </Button>
-            </TabsContent>
-          </Tabs>
-        </CardContent>
-      </Card>
+        {mode === "same" && (
+          <div className="grid grid-cols-2 gap-3 pt-1">
+            <div>
+              <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">距離 (km)</Label>
+              <Input
+                type="number"
+                step="0.1"
+                min="0"
+                inputMode="decimal"
+                className="wm-num mt-1"
+                placeholder="5.0"
+                value={sameDistance}
+                onChange={(e) => setSameDistance(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">人数</Label>
+              <Input
+                type="number"
+                min="1"
+                inputMode="numeric"
+                className="wm-num mt-1"
+                value={samePersonCount}
+                onChange={(e) => setSamePersonCount(e.target.value)}
+              />
+            </div>
+          </div>
+        )}
 
-      {results && (
-        <Card className="border-primary">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base text-primary">計算結果</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="p-3 bg-muted rounded-lg">
-                <p className="text-sm text-muted-foreground">合計距離</p>
-                <p className="text-2xl font-bold">{results.totalDistance.toFixed(1)} km</p>
-              </div>
-              <div className="p-3 bg-primary/10 rounded-lg">
-                <p className="text-sm text-muted-foreground">合計料金</p>
-                <p className="text-2xl font-bold text-primary">{formatCurrency(results.totalFare)}</p>
-              </div>
+        {mode === "segments" && (
+          <div className="space-y-3 pt-1">
+            <div className="rounded-[12px] bg-[var(--wm-surface)] p-3 text-[12px] text-[var(--wm-ink-2)]">
+              降車順に、各区間の距離と降車人数を入力してください。距離料金は乗車中の人数で按分、迎車料金は全員で均等分割されます。
             </div>
 
-            {results.mode === "same" && (
-              <div className="p-4 bg-accent rounded-lg">
-                <div className="flex items-center gap-2 mb-1">
-                  <Users className="h-4 w-4 text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground">{results.personCount}人で割り勘</p>
-                </div>
-                <p className="text-sm text-muted-foreground">一人あたり</p>
-                <p className="text-3xl font-bold text-primary">
-                  {formatCurrency(results.perPerson)}
-                  {results.remainder > 0 && (
-                    <span className="text-base font-normal text-muted-foreground ml-1">
-                      〜{formatCurrency(results.perPerson + 1)}
+            {/* 区間タイムライン入力 */}
+            <div className="relative pl-7">
+              <div
+                className="absolute left-[11px] top-3 bottom-3 w-[2px]"
+                style={{ background: "var(--wm-line-strong)" }}
+              />
+              {segments.map((seg, index) => {
+                const isLast = index === segments.length - 1
+                return (
+                  <div key={seg.id} className="relative pb-3">
+                    <span
+                      className="absolute -left-[28px] top-2 inline-flex h-[20px] w-[20px] items-center justify-center rounded-full text-[10px] font-bold text-white"
+                      style={{
+                        background: isLast ? "var(--wm-accent)" : "var(--wm-ink-3)",
+                      }}
+                    >
+                      {index + 1}
                     </span>
-                  )}
-                </p>
-                {results.remainder > 0 && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    端数調整: {results.remainder}人が+1円（合計{formatCurrency(results.totalFare)}に一致）
-                  </p>
-                )}
+                    <div className="flex items-center gap-1.5">
+                      <Input
+                        placeholder="降りる人・地点"
+                        className="h-9 flex-1 text-[13px]"
+                        value={seg.name}
+                        onChange={(e) => updateSegment(seg.id, { name: e.target.value })}
+                      />
+                      <Input
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        inputMode="decimal"
+                        placeholder="km"
+                        className="wm-num h-9 w-16 text-right text-[13px]"
+                        value={seg.distanceKm || ""}
+                        onChange={(e) =>
+                          updateSegment(seg.id, { distanceKm: e.target.value === "" ? 0 : Number.parseFloat(e.target.value) })
+                        }
+                      />
+                      <Input
+                        type="number"
+                        min="1"
+                        inputMode="numeric"
+                        placeholder="人"
+                        className="wm-num h-9 w-12 text-center text-[13px]"
+                        value={seg.dropCount || 1}
+                        onChange={(e) =>
+                          updateSegment(seg.id, { dropCount: Math.max(1, Number.parseInt(e.target.value, 10) || 1) })
+                        }
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeSegment(seg.id)}
+                        disabled={segments.length === 1}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[var(--wm-ink-3)] transition hover:bg-[var(--wm-surface)] hover:text-destructive disabled:opacity-40 disabled:hover:bg-transparent"
+                        aria-label="削除"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            <Button variant="outline" size="sm" onClick={addSegment} className="bg-card">
+              <Plus className="mr-1 h-4 w-4" />
+              区間を追加
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {results && (
+        <>
+          {/* 黒地 合計カード (デザインの Taxi 計算結果ヘッダー) */}
+          <div
+            className="rounded-2xl p-5"
+            style={{ background: "var(--wm-ink)", color: "#fff" }}
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <div className="text-[11px] font-semibold tracking-[.1em] opacity-60">
+                  合計料金 ({results.totalDistance.toFixed(1)} km)
+                </div>
+                <div className="wm-num mt-1 text-[30px] font-bold leading-none tracking-tight">
+                  ¥{results.totalFare.toLocaleString()}
+                </div>
+              </div>
+              {results.mode === "same" && (
+                <div className="text-right">
+                  <div className="text-[11px] font-semibold tracking-[.1em] opacity-60">
+                    1人あたり
+                  </div>
+                  <div className="wm-num mt-1 text-[22px] font-bold">
+                    ¥{results.perPerson.toLocaleString()}
+                    {results.remainder > 0 && (
+                      <span className="text-[12px] font-medium opacity-70">
+                        〜¥{(results.perPerson + 1).toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* same モード: 端数の補足 */}
+            {results.mode === "same" && results.remainder > 0 && (
+              <div className="mt-3 rounded-[10px] bg-white/[0.06] p-2.5 text-[11px] opacity-80">
+                端数調整: {results.remainder} 人が +1 円で合計 ¥{results.totalFare.toLocaleString()} に一致
               </div>
             )}
 
+            {/* segments モード: 1 人乗車中の数 + 単価 */}
             {results.mode === "segments" && (
-              <div className="border-t pt-4 space-y-4">
-                {(settings.pickupFee || 0) > 0 && (
-                  <div className="p-2 bg-muted/50 rounded text-xs text-muted-foreground">
-                    迎車料金 {formatCurrency(settings.pickupFee)} → {results.totalPassengers}人で均等分割（1人あたり{formatCurrency(results.pickupPerPerson)}）
-                  </div>
-                )}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <h4 className="font-medium">区間ごとの内訳</h4>
-                    <span className="text-xs text-muted-foreground">
-                      {results.totalPassengers}人乗車 / 距離単価 {formatCurrency(Math.round(results.pricePerKm))}/km
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mb-2">タップで計算式を表示</p>
-                  <div className="space-y-2">
-                    {results.segments.map((seg, index) => {
-                      const isExpanded = expandedSegments.has(seg.id)
-                      const toggleExpand = () => {
-                        setExpandedSegments(prev => {
-                          const next = new Set(prev)
-                          if (next.has(seg.id)) {
-                            next.delete(seg.id)
-                          } else {
-                            next.add(seg.id)
-                          }
-                          return next
-                        })
-                      }
-                      return (
-                        <div
-                          key={seg.id}
-                          className="p-2 bg-muted/50 rounded cursor-pointer hover:bg-muted/70 transition-colors"
-                          onClick={toggleExpand}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <span className="font-medium">{seg.name || `降車 ${index + 1}`}</span>
-                              <span className="text-xs text-muted-foreground ml-2">({seg.distanceKm.toFixed(1)} km)</span>
-                              {(results.passengers[index]?.count ?? 1) > 1 && (
-                                <span className="text-xs text-muted-foreground ml-1">×{results.passengers[index].count}人</span>
-                              )}
-                            </div>
-                            <span className="font-bold text-primary">
-                              {formatCurrency(results.passengers[index]?.amount ?? 0)}
-                              <span className="text-xs font-normal text-muted-foreground">/人</span>
-                            </span>
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            区間料金 {formatCurrency(seg.segmentFare)} / {seg.riderCount}人乗車 / 1人あたり{formatCurrency(seg.perPersonShare)}
-                          </p>
-                          {isExpanded && (
-                            <div className="mt-2 p-2 bg-background rounded text-xs space-y-1 border">
-                              <p className="font-medium text-foreground">計算式:</p>
-                              <p className="text-muted-foreground">
-                                区間料金 = 距離 × km単価（距離按分）
-                              </p>
-                              <p className="font-mono text-foreground">
-                                = {seg.distanceKm.toFixed(1)} km × {formatCurrency(Math.round(results.pricePerKm))}/km = {formatCurrency(seg.segmentFare)}
-                              </p>
-                              <p className="text-muted-foreground mt-1">
-                                距離按分の1人あたり = 区間料金 ÷ 乗車人数
-                              </p>
-                              <p className="font-mono text-foreground">
-                                = {formatCurrency(seg.segmentFare)} ÷ {seg.riderCount}人 = {formatCurrency(seg.perPersonShare)}
-                              </p>
-                              {results.pickupPerPerson > 0 && (
-                                <>
-                                  <p className="text-muted-foreground mt-1">
-                                    + 迎車料金（均等分割）= {formatCurrency(results.pickupPerPerson)}/人
-                                  </p>
-                                </>
-                              )}
-                              <p className="text-muted-foreground mt-1 pt-1 border-t">
-                                この地点で降りる人の支払い（1人あたり）:
-                              </p>
-                              <p className="font-mono text-foreground">
-                                = 距離累積{results.pickupPerPerson > 0 ? " + 迎車" : ""} = {formatCurrency(results.passengers[index]?.amount ?? 0)}
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                  <div className="mt-3 pt-2 border-t flex items-center justify-between text-xs text-muted-foreground">
-                    <span>支払合計（{results.totalPassengers}人）</span>
-                    <span className="font-medium text-foreground">
-                      {formatCurrency(results.passengers.reduce((sum, p) => sum + p.amount * p.count, 0))}
-                      {results.passengers.reduce((sum, p) => sum + p.amount * p.count, 0) === results.totalFare && (
-                        <span className="text-green-600 ml-1">✓一致</span>
-                      )}
-                    </span>
-                  </div>
-                </div>
+              <div className="mt-3.5 flex items-center justify-between text-[11px] opacity-70">
+                <span>{results.totalPassengers}人乗車</span>
+                <span className="wm-num">
+                  距離単価 ¥{Math.round(results.pricePerKm).toLocaleString()}/km
+                </span>
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+
+          {/* segments モード: 降りる順番タイムライン (デザインの「降りる順番」) */}
+          {results.mode === "segments" && (
+            <div className="wm-card p-4">
+              <h3 className="wm-h3 mb-3 text-[14px] font-semibold">降りる順番</h3>
+              <div className="relative pl-8">
+                <div
+                  className="absolute left-[11px] top-3 bottom-3 w-[2px]"
+                  style={{ background: "var(--wm-line-strong)" }}
+                />
+                {results.segments.map((seg, index) => {
+                  const isExpanded = expandedSegments.has(seg.id)
+                  const passenger = results.passengers[index]
+                  const isLast = index === results.segments.length - 1
+                  const toggleExpand = () => {
+                    setExpandedSegments((prev) => {
+                      const next = new Set(prev)
+                      if (next.has(seg.id)) next.delete(seg.id)
+                      else next.add(seg.id)
+                      return next
+                    })
+                  }
+                  return (
+                    <div key={seg.id} className="relative pb-3 last:pb-0">
+                      <span
+                        className="absolute -left-[28px] top-1.5 inline-flex h-[20px] w-[20px] items-center justify-center rounded-full text-[10px] font-bold text-white"
+                        style={{
+                          background: isLast ? "var(--wm-accent)" : "var(--wm-ink-3)",
+                          border: isLast ? "none" : "2px solid var(--wm-card)",
+                          boxShadow: !isLast ? "0 0 0 2px var(--wm-line-strong)" : undefined,
+                        }}
+                      >
+                        {index + 1}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={toggleExpand}
+                        className="block w-full rounded-[12px] border border-[var(--wm-line)] bg-card px-3 py-2.5 text-left transition hover:bg-[var(--wm-surface)]/50"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-[13.5px] font-medium">
+                              {seg.name || `降車 ${index + 1}`}
+                              {(passenger?.count ?? 1) > 1 && (
+                                <span className="ml-1 text-[11px] text-[var(--wm-ink-3)]">
+                                  ×{passenger.count}人
+                                </span>
+                              )}
+                            </div>
+                            <div className="wm-num mt-0.5 text-[11px] text-[var(--wm-ink-3)]">
+                              {seg.distanceKm.toFixed(1)} km · {seg.riderCount}人乗車
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="wm-num text-[15px] font-bold text-[var(--wm-accent)]">
+                              ¥{(passenger?.amount ?? 0).toLocaleString()}
+                            </div>
+                            <div className="text-[10px] text-[var(--wm-ink-3)]">/人</div>
+                          </div>
+                        </div>
+
+                        {isExpanded && (
+                          <div className="mt-2.5 space-y-1 rounded-[10px] bg-[var(--wm-surface)] p-2.5 text-[11px]">
+                            <div className="font-semibold text-foreground">計算式</div>
+                            <div className="text-[var(--wm-ink-3)]">
+                              区間料金 = 距離 × km 単価
+                            </div>
+                            <div className="wm-num text-foreground">
+                              = {seg.distanceKm.toFixed(1)} km × ¥{Math.round(results.pricePerKm).toLocaleString()}/km = ¥{seg.segmentFare.toLocaleString()}
+                            </div>
+                            <div className="text-[var(--wm-ink-3)] mt-1">
+                              距離按分 ÷ 乗車人数
+                            </div>
+                            <div className="wm-num text-foreground">
+                              = ¥{seg.segmentFare.toLocaleString()} ÷ {seg.riderCount}人 = ¥{seg.perPersonShare.toLocaleString()}
+                            </div>
+                            {results.pickupPerPerson > 0 && (
+                              <div className="text-[var(--wm-ink-3)] mt-1">
+                                + 迎車料金 (均等分割) = ¥{results.pickupPerPerson.toLocaleString()}/人
+                              </div>
+                            )}
+                            <div className="mt-1.5 border-t border-[var(--wm-line)] pt-1.5 text-[var(--wm-ink-3)]">
+                              この地点で降りる人の支払い (1人あたり)
+                            </div>
+                            <div className="wm-num font-bold text-foreground">
+                              = ¥{(passenger?.amount ?? 0).toLocaleString()}
+                            </div>
+                          </div>
+                        )}
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {(settings.pickupFee || 0) > 0 && (
+                <div className="mt-3 rounded-[10px] bg-[var(--wm-surface)] p-2.5 text-[11px] text-[var(--wm-ink-2)]">
+                  迎車料金 ¥{(settings.pickupFee ?? 0).toLocaleString()} を {results.totalPassengers}人で均等分割
+                  (1人あたり ¥{results.pickupPerPerson.toLocaleString()})
+                </div>
+              )}
+
+              <div className="mt-3 flex items-center justify-between border-t border-[var(--wm-line)] pt-2.5 text-[12px]">
+                <span className="text-[var(--wm-ink-3)]">支払合計 ({results.totalPassengers}人)</span>
+                <span className="wm-num font-semibold">
+                  ¥{results.passengers.reduce((sum, p) => sum + p.amount * p.count, 0).toLocaleString()}
+                  {results.passengers.reduce((sum, p) => sum + p.amount * p.count, 0) === results.totalFare && (
+                    <span className="ml-1 text-[var(--wm-success)]">✓</span>
+                  )}
+                </span>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   )

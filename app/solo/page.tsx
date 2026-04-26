@@ -2,7 +2,6 @@
 
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { ArrowLeft, Plus, History } from "lucide-react"
 
@@ -15,59 +14,55 @@ export default function SoloEntryPage() {
   }
 
   return (
-    <main className="min-h-screen flex flex-col">
-      {/* Header */}
-      <header className="border-b bg-card">
-        <div className="container mx-auto px-4 py-4">
-          <Link
-            href="/"
-            className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mb-2"
+    <main className="min-h-screen bg-background">
+      <div className="mx-auto w-full max-w-md px-4 pb-10 pt-6">
+        <Link
+          href="/"
+          className="inline-flex items-center gap-1.5 text-[13px] text-[var(--wm-ink-3)] transition-colors hover:text-foreground"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          トップに戻る
+        </Link>
+
+        <div className="mt-4">
+          <div className="text-[12px] text-[var(--wm-ink-3)]">ソロモード · 自動保存</div>
+          <h1 className="mt-1 text-[22px] font-bold tracking-tight">個人用の注文管理</h1>
+        </div>
+
+        {/* 黒地の合計カード (空状態) */}
+        <div className="mt-5 rounded-2xl p-5" style={{ background: "var(--wm-ink)", color: "#fff" }}>
+          <div className="text-[11px] font-semibold tracking-[.1em] opacity-60">合計</div>
+          <div className="wm-num mt-1 text-[32px] font-bold leading-none">¥0</div>
+          <div className="mt-2 text-[12px] opacity-60">新しい記録を始めましょう</div>
+        </div>
+
+        {/* メイン CTA */}
+        <Button onClick={handleNewSession} className="mt-5 h-12 w-full text-[15px]">
+          <Plus className="mr-1 h-4 w-4" />
+          新規セッションを作成
+        </Button>
+
+        {/* 履歴へ */}
+        <Link
+          href="/solo/history"
+          className="mt-3 flex items-center gap-3 rounded-2xl border border-[var(--wm-line)] bg-card p-4 transition hover:border-primary/40 hover:shadow-sm"
+        >
+          <span
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[11px] text-foreground"
+            style={{ background: "var(--wm-surface)" }}
           >
-            <ArrowLeft className="h-4 w-4" />
-            トップに戻る
-          </Link>
-          <h1 className="text-2xl font-bold text-primary">ソロモード</h1>
-          <p className="text-sm text-muted-foreground">個人用の注文管理・割り勘計算</p>
-        </div>
-      </header>
+            <History className="h-5 w-5" />
+          </span>
+          <div className="flex-1">
+            <div className="text-[15px] font-semibold">履歴を見る</div>
+            <div className="mt-0.5 text-[12px] text-[var(--wm-ink-3)]">過去のセッションを確認</div>
+          </div>
+          <span className="text-[var(--wm-ink-3)]">›</span>
+        </Link>
 
-      {/* Main Content */}
-      <div className="flex-1 container mx-auto px-4 py-8">
-        <div className="max-w-md mx-auto space-y-4">
-          <p className="text-sm text-muted-foreground text-center bg-muted/50 p-3 rounded-lg">
-            ※ データは端末に保存され、他のデバイスとは共有されません
-          </p>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Plus className="h-5 w-5" />
-                新規セッション
-              </CardTitle>
-              <CardDescription>新しい注文記録を始めます</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button className="w-full" onClick={handleNewSession}>
-                新規作成
-              </Button>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <History className="h-5 w-5" />
-                履歴
-              </CardTitle>
-              <CardDescription>過去のセッションを確認</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Button asChild variant="outline" className="w-full bg-transparent">
-                <Link href="/solo/history">履歴を見る</Link>
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
+        <p className="mt-6 rounded-[12px] bg-[var(--wm-surface)] p-3 text-center text-[12px] leading-relaxed text-[var(--wm-ink-2)]">
+          ※ データは端末に保存され、他のデバイスとは共有されません
+        </p>
       </div>
     </main>
   )

@@ -3,7 +3,20 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users, tables, tableMembers } from "@/lib/db/schema";
 import { eq, asc, and } from "drizzle-orm";
-import { isUserTableMember, isUserTableOwner, resolveDbUserId, resolveUserIdFromGuestToken } from "@/lib/auth/permissions";
+import { resolveUserIdFromGuestToken } from "@/lib/auth/permissions";
+import { tableEvents } from "@/lib/events/table-events";
+import bcrypt from "bcryptjs";
+import { clientKey, rateLimit, rateLimitHeaders } from "@/lib/security/rate-limit";
+import { z } from "zod";
+
+const joinMemberSchema = z
+  .object({
+    tableId: z.string().uuid(),
+    displayName: z.string().trim().min(1).max(50),
+    invitePassword: z.string().trim().min(1).max(64).optional(),
+    isGuest: z.boolean().optional().default(false),
+  })
+  .strict();
 
 async function resolveUserId(request: Request): Promise<{ userId: string | null; isGuest: boolean }> {
   const session = await auth();
@@ -39,7 +52,7 @@ async function resolveUserId(request: Request): Promise<{ userId: string | null;
   return { userId: null, isGuest: false };
 }
 
-async function isUserTableMemberWithGuest(userId: string, tableId: string, isGuestUser: boolean): Promise<boolean> {
+async function isUserTableMemberWithGuest(userId: string, tableId: string, _isGuestUser: boolean): Promise<boolean> {
   const [member] = await db
     .select({ id: tableMembers.id })
     .from(tableMembers)
@@ -56,15 +69,25 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = await request.json().catch(() => null);
-  const tableId = body?.tableId as string | undefined;
-  const displayName = body?.displayName as string | undefined;
-  const invitePassword = body?.invitePassword as string | undefined;
-  const isGuest = body?.isGuest === true;
-
-  if (!tableId || !displayName) {
-    return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+  const rawBody = await request.json().catch(() => null);
+  const parsed = joinMemberSchema.safeParse(rawBody);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "リクエストの内容が不正です", details: parsed.error.issues.map((i) => i.message) },
+      { status: 400 },
+    );
   }
+  const { tableId, displayName, invitePassword, isGuest } = parsed.data;
+
+  // 招待パスワード総当たり対策: 同一 IP + 同一テーブルへの参加試行を 1 分 10 回まで
+  const limit = rateLimit(clientKey(request, `member-join:${tableId}`), { windowSec: 60, max: 10 });
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: "試行回数が多すぎます。しばらく経ってから再度お試しください。" },
+      { status: 429, headers: rateLimitHeaders(limit) },
+    );
+  }
+
 
   // Ensure table exists and check archive/owner/lock status
   const [table] = await db
@@ -72,6 +95,7 @@ export async function POST(request: Request) {
       id: tables.id,
       ownerUserId: tables.ownerUserId,
       invitePassword: tables.invitePassword,
+      inviteTokenExpiresAt: tables.inviteTokenExpiresAt,
       isArchived: tables.isArchived,
       isLocked: tables.isLocked,
       autoLockAt: tables.autoLockAt,
@@ -84,13 +108,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "テーブルが見つかりません" }, { status: 404 });
   }
 
-  if (table.isArchived && table.ownerUserId !== userId) {
+  const isOwner = table.ownerUserId === userId;
+
+  // 招待トークンの有効期限チェック（オーナーはバイパス可能）
+  if (!isOwner && table.inviteTokenExpiresAt && new Date(table.inviteTokenExpiresAt) < new Date()) {
+    return NextResponse.json({ error: "招待リンクの有効期限が切れています" }, { status: 403 });
+  }
+
+  if (table.isArchived && !isOwner) {
     return NextResponse.json({ error: "This table is archived" }, { status: 403 });
   }
 
   // Check if table is locked (either manually or auto-locked)
   // オーナーはロックをバイパスできる
-  const isOwner = table.ownerUserId === userId;
   const isAutoLocked = table.autoLockAt && new Date(table.autoLockAt) < new Date();
   if ((table.isLocked || isAutoLocked) && !isOwner) {
     return NextResponse.json({ error: "このセッションは参加を締め切りました" }, { status: 403 });
@@ -98,7 +128,16 @@ export async function POST(request: Request) {
 
   // Check invite password (only for non-owner regular joins)
   if (table.invitePassword && !isOwner && !isGuest) {
-    if (!invitePassword || invitePassword.trim().toUpperCase() !== table.invitePassword.toUpperCase()) {
+    if (!invitePassword) {
+      return NextResponse.json({ error: "招待パスワードが正しくありません" }, { status: 403 });
+    }
+    const normalizedInput = invitePassword.trim().toUpperCase();
+    // bcrypt ハッシュ（$2で始まる）か平文かを判定して検証
+    const isHashed = table.invitePassword.startsWith("$2");
+    const isValid = isHashed
+      ? await bcrypt.compare(normalizedInput, table.invitePassword)
+      : normalizedInput === table.invitePassword.toUpperCase();
+    if (!isValid) {
       return NextResponse.json({ error: "招待パスワードが正しくありません" }, { status: 403 });
     }
   }
@@ -114,12 +153,13 @@ export async function POST(request: Request) {
       const [newMember] = await db.insert(tableMembers).values({
         tableId,
         userId: null, // Guest members don't have a user account
-        displayName: displayName.trim(),
+        displayName,
         isMaster: false,
         isGuest: true,
         addedByUserId: userId,
       }).returning({ id: tableMembers.id });
 
+      tableEvents.emitTableEvent(tableId, "member:joined", { memberId: newMember.id });
       return NextResponse.json({ success: true, memberId: newMember.id });
     } catch (error) {
       console.error("Guest member creation error:", error);
@@ -136,12 +176,13 @@ export async function POST(request: Request) {
       await db.insert(tableMembers).values({
         tableId,
         userId: userId,
-        displayName: displayName.trim(),
+        displayName,
         isMaster: false,
         isGuest: isGuestUser,
         addedByUserId: null,
       });
 
+      tableEvents.emitTableEvent(tableId, "member:joined", { userId });
       return NextResponse.json({ success: true });
     } catch (error) {
       console.error("Member creation error:", error);
@@ -280,6 +321,7 @@ export async function DELETE(request: Request) {
 
   try {
     await db.delete(tableMembers).where(eq(tableMembers.id, memberId));
+    tableEvents.emitTableEvent(member.tableId, "member:left", { memberId });
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Member deletion error:", error);

@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import type { Order, TableMember, User } from "@/lib/types/group";
 import { ArrowLeft, Loader2, Archive } from "lucide-react";
 import { TableDetailClient } from "./table-detail-client";
-import { getGuestToken, getGuestUserId, hasGuestSession } from "@/lib/guest/guest-session";
+import { getGuestToken } from "@/lib/guest/guest-session";
 
 interface TableData {
   id: string;
@@ -31,14 +32,97 @@ interface TableDetailPageClientProps {
   error?: string;
 }
 
+interface ApiUser {
+  id: string;
+  email: string | null;
+  nickname: string | null;
+  isAdmin?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+interface ApiMember {
+  id: string;
+  tableId: string;
+  userId: string | null;
+  displayName: string;
+  isMaster: boolean;
+  isGuest: boolean;
+  addedByUserId: string | null;
+  joinedAt: string;
+  user?: ApiUser;
+}
+
+interface ApiOrder {
+  id: string;
+  tableId: string;
+  memberId: string;
+  createdByUserId: string | null;
+  itemName: string | null;
+  unitPrice: number;
+  quantity: number;
+  lineTotal: number;
+  isShared?: boolean;
+  sharedGroupId?: string | null;
+  deletedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  member?: ApiMember;
+}
+
+function mapUserFromApi(user: ApiUser): User {
+  return {
+    id: user.id,
+    firebase_uid: user.id,
+    email: user.email,
+    nickname: user.nickname,
+    is_admin: user.isAdmin ?? false,
+    created_at: user.createdAt ?? new Date().toISOString(),
+    updated_at: user.updatedAt ?? new Date().toISOString(),
+  };
+}
+
+function mapMemberFromApi(member: ApiMember): TableMember & { user?: User } {
+  return {
+    id: member.id,
+    table_id: member.tableId,
+    user_id: member.userId,
+    display_name: member.displayName,
+    is_master: member.isMaster,
+    is_guest: member.isGuest,
+    added_by_user_id: member.addedByUserId,
+    joined_at: member.joinedAt,
+    user: member.user ? mapUserFromApi(member.user) : undefined,
+  };
+}
+
+function mapOrderFromApi(order: ApiOrder): Order & { member?: TableMember } {
+  return {
+    id: order.id,
+    table_id: order.tableId,
+    member_id: order.memberId,
+    created_by_user_id: order.createdByUserId,
+    item_name: order.itemName,
+    unit_price: order.unitPrice,
+    quantity: order.quantity,
+    line_total: order.lineTotal,
+    is_shared: order.isShared ?? false,
+    shared_group_id: order.sharedGroupId ?? null,
+    deleted_at: order.deletedAt,
+    created_at: order.createdAt,
+    updated_at: order.updatedAt,
+    member: order.member ? mapMemberFromApi(order.member) : undefined,
+  };
+}
+
 export function TableDetailPageClient({ table, token, ownerName = "作成者", error }: TableDetailPageClientProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [isGuest, setIsGuest] = useState(false);
-  const [membership, setMembership] = useState<any>(null);
-  const [members, setMembers] = useState<any[]>([]);
-  const [orders, setOrders] = useState<any[]>([]);
-  const [dbUser, setDbUser] = useState<any>(null);
+  const [membership, setMembership] = useState<TableMember | null>(null);
+  const [members, setMembers] = useState<(TableMember & { user?: User })[]>([]);
+  const [orders, setOrders] = useState<(Order & { member?: TableMember })[]>([]);
+  const [dbUser, setDbUser] = useState<User | null>(null);
   const router = useRouter();
 
   const fetchData = useCallback(async () => {
@@ -58,12 +142,12 @@ export function TableDetailPageClient({ table, token, ownerName = "作成者", e
       // First check authentication
       let currentUserId: string | null = null;
       let isGuestUser = false;
-      let currentUser: any = null;
+      let currentUser: User | null = null;
 
       if (guestToken) {
         const guestRes = await fetch(`/api/auth/guest?token=${encodeURIComponent(guestToken)}`);
         if (guestRes.ok) {
-          const guestData = await guestRes.json();
+          const guestData = (await guestRes.json()) as { userId: string; nickname?: string | null };
           currentUserId = guestData.userId;
           isGuestUser = true;
           currentUser = {
@@ -81,7 +165,14 @@ export function TableDetailPageClient({ table, token, ownerName = "作成者", e
       if (!currentUserId) {
         const profileRes = await fetch("/api/users/profile");
         if (profileRes.ok) {
-          const profileData = await profileRes.json();
+          const profileData = (await profileRes.json()) as {
+            id: string;
+            email: string | null;
+            nickname: string | null;
+            isAdmin?: boolean;
+            createdAt?: string;
+            updatedAt?: string;
+          };
           currentUserId = profileData.id;
           isGuestUser = false;
           currentUser = {
@@ -115,33 +206,13 @@ export function TableDetailPageClient({ table, token, ownerName = "作成者", e
         throw new Error("Failed to fetch members");
       }
 
-      const membersData = await membersRes.json();
-      const membersFormatted = membersData.data.map((m: any) => ({
-        id: m.id,
-        table_id: m.tableId,
-        user_id: m.userId,
-        display_name: m.displayName,
-        is_master: m.isMaster,
-        is_guest: m.isGuest,
-        added_by_user_id: m.addedByUserId,
-        joined_at: m.joinedAt,
-        user: m.user
-          ? {
-              id: m.user.id,
-              firebase_uid: m.user.id,
-              email: m.user.email,
-              nickname: m.user.nickname,
-              is_admin: m.user.isAdmin,
-              created_at: m.user.createdAt,
-              updated_at: m.user.updatedAt,
-            }
-          : undefined,
-      }));
+      const membersData = (await membersRes.json()) as { data?: ApiMember[] };
+      const membersFormatted = (membersData.data ?? []).map(mapMemberFromApi);
 
       setMembers(membersFormatted);
 
       // Find current user's membership
-      const currentMembership = membersFormatted.find((m: any) => m.user_id === currentUserId);
+      const currentMembership = membersFormatted.find((m) => m.user_id === currentUserId);
       if (!currentMembership) {
         router.push(`/group/join/${token}`);
         return;
@@ -161,32 +232,8 @@ export function TableDetailPageClient({ table, token, ownerName = "作成者", e
       // Fetch orders
       const ordersRes = await fetch(`/api/orders?tableId=${table.id}`, { headers });
       if (ordersRes.ok) {
-        const ordersData = await ordersRes.json();
-        const ordersFormatted = (ordersData.data || []).map((o: any) => ({
-          id: o.id,
-          table_id: o.tableId,
-          member_id: o.memberId,
-          created_by_user_id: o.createdByUserId,
-          item_name: o.itemName,
-          unit_price: o.unitPrice,
-          quantity: o.quantity,
-          line_total: o.lineTotal,
-          deleted_at: o.deletedAt,
-          created_at: o.createdAt,
-          updated_at: o.updatedAt,
-          member: o.member
-            ? {
-                id: o.member.id,
-                table_id: o.member.tableId,
-                user_id: o.member.userId,
-                display_name: o.member.displayName,
-                is_master: o.member.isMaster,
-                is_guest: o.member.isGuest,
-                added_by_user_id: o.member.addedByUserId,
-                joined_at: o.member.joinedAt,
-              }
-            : undefined,
-        }));
+        const ordersData = (await ordersRes.json()) as { data?: ApiOrder[] };
+        const ordersFormatted = (ordersData.data ?? []).map(mapOrderFromApi);
         setOrders(ordersFormatted);
       }
     } catch (err) {

@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
+import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { tables, tableMembers } from "@/lib/db/schema";
+import { users, tables, tableMembers } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { TableDetailPageClient } from "@/components/group/table-detail-page-client";
+import { decryptInvitePassword, isEncryptedInvitePassword } from "@/lib/crypto/invite-password";
 
 // 動的URLは検索エンジンにインデックスさせない
 export const metadata: Metadata = {
@@ -37,6 +39,38 @@ export default async function TableDetailPage({
     .where(and(eq(tableMembers.tableId, table.id), eq(tableMembers.isMaster, true)))
     .limit(1);
 
+  // 現在のユーザーがテーブルのオーナーかを判定。
+  // オーナーにのみ復号した招待パスワードを返す (一般メンバーには渡さない)。
+  const session = await auth();
+  let currentUserId: string | null = null;
+  if (session?.user?.id) {
+    const [dbUser] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.id, session.user.id))
+      .limit(1);
+    currentUserId = dbUser?.id ?? session.user.id;
+    if (!dbUser && session.user.email) {
+      const [byEmail] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.email, session.user.email))
+        .limit(1);
+      if (byEmail) currentUserId = byEmail.id;
+    }
+  }
+  const isOwner = currentUserId !== null && currentUserId === table.ownerUserId;
+
+  let invitePasswordForOwner: string | null = null;
+  if (isOwner && table.invitePassword) {
+    if (isEncryptedInvitePassword(table.invitePassword)) {
+      invitePasswordForOwner = decryptInvitePassword(table.invitePassword);
+    } else if (!table.invitePassword.startsWith("$2")) {
+      // 旧平文 (移行期間)。bcrypt ハッシュは復元不能なので null のまま。
+      invitePasswordForOwner = table.invitePassword;
+    }
+  }
+
   // Convert table to expected format
   const tableForComponent = {
     id: table.id,
@@ -44,7 +78,7 @@ export default async function TableDetailPage({
     name: table.name,
     event_date: table.eventDate.toISOString().split("T")[0],
     invite_token: table.inviteToken,
-    invite_password: table.invitePassword ?? null,
+    invite_password: invitePasswordForOwner,
     is_archived: table.isArchived,
     archived_at: table.archivedAt?.toISOString() ?? null,
     is_locked: table.isLocked,

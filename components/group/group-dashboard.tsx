@@ -2,10 +2,10 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
 import type { User } from "@/lib/types/group"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { LogoutButton } from "@/components/auth/logout-control"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -37,7 +37,6 @@ import {
   ArchiveRestore,
   Trash2,
   Settings,
-  LogOut,
   ChevronRight,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -59,7 +58,6 @@ interface GroupDashboardProps {
 
 export function GroupDashboard({ user, tables: initialTables }: GroupDashboardProps) {
   const [tables, setTables] = useState(initialTables)
-  const _router = useRouter()
 
   const activeTables = tables.filter((t) => !t.is_archived)
   const archivedTables = tables.filter((t) => t.is_archived)
@@ -138,11 +136,7 @@ export function GroupDashboard({ user, tables: initialTables }: GroupDashboardPr
               <Settings className="h-4 w-4" />
             </Link>
           </Button>
-          <Button asChild variant="outline" size="icon" className="h-9 w-9 bg-card" aria-label="ログアウト">
-            <Link href="/auth/logout" prefetch={false}>
-              <LogOut className="h-4 w-4" />
-            </Link>
-          </Button>
+          <LogoutButton variant="outline" size="icon" className="h-9 w-9 bg-card" aria-label="ログアウト" iconOnly />
         </div>
 
         {/* Tables */}

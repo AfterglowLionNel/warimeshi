@@ -12,6 +12,7 @@ coverage/
 .DS_Store
 .vscode/
 .idea/
+ecosystem.local.config.js
 
 tsconfig.tsbuildinfo
 package-lock.json

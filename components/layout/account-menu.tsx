@@ -4,6 +4,7 @@ import Image from "next/image"
 import Link from "next/link"
 import type { Session } from "next-auth"
 import { Button } from "@/components/ui/button"
+import { LogoutMenuItem } from "@/components/auth/logout-control"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,7 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { User, Settings, LogOut, LogIn } from "lucide-react"
+import { User, Settings, LogIn } from "lucide-react"
 
 interface AccountMenuProps {
   session: Session | null
@@ -77,12 +78,7 @@ export function AccountMenu({ session }: AccountMenuProps) {
           </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <Link href="/auth/logout" className="cursor-pointer text-destructive" prefetch={false}>
-            <LogOut className="h-4 w-4 mr-2" />
-            ログアウト
-          </Link>
-        </DropdownMenuItem>
+        <LogoutMenuItem />
       </DropdownMenuContent>
     </DropdownMenu>
   )

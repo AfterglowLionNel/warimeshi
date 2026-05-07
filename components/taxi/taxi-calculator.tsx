@@ -2,17 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { CalculationMode, FareSettings, Modifier, Segment, VehicleType } from "@/lib/types/taxi"
-import { formatCurrency } from "@/lib/utils/format"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { Calculator, Car, ChevronDown, Plus, Trash2, Truck, Users } from "lucide-react"
+import { Calculator, Car, ChevronDown, Plus, Trash2, Truck } from "lucide-react"
 import { toast } from "sonner"
 
 interface TaxiCalculatorProps {
@@ -70,7 +67,7 @@ export function TaxiCalculator({
   const [sameDistance, setSameDistance] = useState("")
   const [samePersonCount, setSamePersonCount] = useState("1")
   const [segments, setSegments] = useState<Segment[]>([{ id: "1", name: "", distanceKm: 0, dropCount: 1 }])
-  const [_isSaving, setIsSaving] = useState(false)
+  const [, setIsSaving] = useState(false)
   const [showLongDistanceSettings, setShowLongDistanceSettings] = useState(vehicleType === "daiko")
   const [expandedSegments, setExpandedSegments] = useState<Set<string>>(new Set())
   const lastSavedHash = useRef<string | null>(null)

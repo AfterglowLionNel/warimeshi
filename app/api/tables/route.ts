@@ -5,7 +5,7 @@ import { users, tables, tableMembers } from "@/lib/db/schema";
 import { eq, inArray, desc } from "drizzle-orm";
 import { generateInviteToken } from "@/lib/utils/format";
 import { resolveUserIdFromGuestToken } from "@/lib/auth/permissions";
-import bcrypt from "bcryptjs";
+import { encryptInvitePassword } from "@/lib/crypto/invite-password";
 import { z } from "zod";
 
 const createTableSchema = z
@@ -52,7 +52,7 @@ async function resolveUserId(request: Request): Promise<{ userId: string | null;
   return { userId: null, isGuest: false };
 }
 
-function generateInvitePassword(length = 8): string {
+function generateInvitePassword(length = 4): string {
   // 紛らわしい文字 (I, L, O, 0, 1) を除外
   const letters = "ABCDEFGHJKMNPQRSTUVWXYZ";
   const digits = "23456789";
@@ -116,9 +116,10 @@ export async function POST(request: Request) {
   const autoLockAt = new Date(Date.now() + 12 * 60 * 60 * 1000);
   // 招待トークンの有効期限（デフォルト7日間）
   const inviteTokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-  const plainPassword = usePassword ? generateInvitePassword() : null;
-  // ハッシュ化して保存（大文字変換後にハッシュ化）
-  const hashedPassword = plainPassword ? await bcrypt.hash(plainPassword.toUpperCase(), 10) : null;
+  // 4 桁の英数字を生成。オーナーが共有ダイアログで再表示できるよう、
+  // DB には AES-256-GCM で暗号化して保存する (鍵は AUTH_SECRET から派生)。
+  const plainPassword = usePassword ? generateInvitePassword().toUpperCase() : null;
+  const storedPassword = plainPassword ? encryptInvitePassword(plainPassword) : null;
 
   try {
     const [newTable] = await db
@@ -129,7 +130,7 @@ export async function POST(request: Request) {
         eventDate: eventDateObj,
         inviteToken,
         inviteTokenExpiresAt,
-        invitePassword: hashedPassword,
+        invitePassword: storedPassword,
         autoLockAt,
       })
       .returning();

@@ -25,7 +25,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -73,47 +72,120 @@ interface TableDetailClientProps {
 type SortField = "display_name" | "unit_price" | "quantity" | "created_at"
 type SortDirection = "asc" | "desc"
 
+type ApiUser = {
+  id: string
+  email?: string | null
+  nickname?: string | null
+  isAdmin?: boolean
+  is_admin?: boolean
+  createdAt?: string
+  created_at?: string
+  updatedAt?: string
+  updated_at?: string
+}
+
+type ApiTableMember = {
+  id: string
+  tableId?: string
+  table_id?: string
+  userId?: string | null
+  user_id?: string | null
+  displayName?: string
+  display_name?: string
+  isMaster?: boolean
+  is_master?: boolean
+  isGuest?: boolean
+  is_guest?: boolean
+  addedByUserId?: string | null
+  added_by_user_id?: string | null
+  joinedAt?: string
+  joined_at?: string
+  user?: ApiUser
+}
+
+type ApiOrder = {
+  id: string
+  tableId?: string
+  table_id?: string
+  memberId?: string
+  member_id?: string
+  createdByUserId?: string | null
+  created_by_user_id?: string | null
+  itemName?: string | null
+  item_name?: string | null
+  unitPrice?: number
+  unit_price?: number
+  quantity: number
+  lineTotal?: number
+  line_total?: number
+  isShared?: boolean
+  is_shared?: boolean
+  sharedGroupId?: string | null
+  shared_group_id?: string | null
+  deletedAt?: string | null
+  deleted_at?: string | null
+  createdAt?: string
+  created_at?: string
+  updatedAt?: string
+  updated_at?: string
+  member?: ApiTableMember
+}
+
+type ApiListResponse<T> = {
+  data?: T[]
+}
+
+type OrderInsert = {
+  table_id: string
+  member_id: string
+  member_ids?: string[]
+  item_name: string | null
+  unit_price: number
+  quantity: number
+  line_total: number
+}
+
 const ITEMS_PER_PAGE = 10
 const MEMBER_COLORS = ["#e0f2fe", "#fef9c3", "#ede9fe", "#dcfce7", "#f1f5f9", "#ffe4e6", "#dbeafe", "#fee2e2"]
 
 // Helper to map API response (camelCase) to component format (snake_case)
-function mapMemberFromApi(m: any): TableMember & { user?: User } {
+function mapMemberFromApi(m: ApiTableMember): TableMember & { user?: User } {
   return {
     id: m.id,
-    table_id: m.tableId ?? m.table_id,
-    user_id: m.userId ?? m.user_id,
-    display_name: m.displayName ?? m.display_name,
-    is_master: m.isMaster ?? m.is_master,
-    is_guest: m.isGuest ?? m.is_guest,
-    added_by_user_id: m.addedByUserId ?? m.added_by_user_id,
-    joined_at: m.joinedAt ?? m.joined_at,
+    table_id: m.tableId ?? m.table_id ?? "",
+    user_id: m.userId ?? m.user_id ?? null,
+    display_name: m.displayName ?? m.display_name ?? "",
+    is_master: m.isMaster ?? m.is_master ?? false,
+    is_guest: m.isGuest ?? m.is_guest ?? false,
+    added_by_user_id: m.addedByUserId ?? m.added_by_user_id ?? null,
+    joined_at: m.joinedAt ?? m.joined_at ?? "",
     user: m.user ? {
       id: m.user.id,
       firebase_uid: m.user.id,
-      email: m.user.email,
-      nickname: m.user.nickname,
-      is_admin: m.user.isAdmin ?? m.user.is_admin,
-      created_at: m.user.createdAt ?? m.user.created_at,
-      updated_at: m.user.updatedAt ?? m.user.updated_at,
+      email: m.user.email ?? null,
+      nickname: m.user.nickname ?? null,
+      is_admin: m.user.isAdmin ?? m.user.is_admin ?? false,
+      created_at: m.user.createdAt ?? m.user.created_at ?? "",
+      updated_at: m.user.updatedAt ?? m.user.updated_at ?? "",
     } : undefined,
   }
 }
 
-function mapOrderFromApi(o: any): Order & { member?: TableMember } {
+function mapOrderFromApi(o: ApiOrder): Order & { member?: TableMember } {
   return {
     id: o.id,
-    table_id: o.tableId ?? o.table_id,
-    member_id: o.memberId ?? o.member_id,
-    created_by_user_id: o.createdByUserId ?? o.created_by_user_id,
-    item_name: o.itemName ?? o.item_name,
-    unit_price: o.unitPrice ?? o.unit_price,
+    table_id: o.tableId ?? o.table_id ?? "",
+    member_id: o.memberId ?? o.member_id ?? "",
+    created_by_user_id: o.createdByUserId ?? o.created_by_user_id ?? null,
+    item_name: o.itemName ?? o.item_name ?? null,
+    unit_price: o.unitPrice ?? o.unit_price ?? 0,
     quantity: o.quantity,
-    line_total: o.lineTotal ?? o.line_total,
+    line_total: o.lineTotal ?? o.line_total ?? 0,
     is_shared: o.isShared ?? o.is_shared ?? false,
     shared_group_id: o.sharedGroupId ?? o.shared_group_id ?? null,
-    deleted_at: o.deletedAt ?? o.deleted_at,
-    created_at: o.createdAt ?? o.created_at,
-    updated_at: o.updatedAt ?? o.updated_at,
+    deleted_at: o.deletedAt ?? o.deleted_at ?? null,
+    created_at: o.createdAt ?? o.created_at ?? "",
+    updated_at: o.updatedAt ?? o.updated_at ?? "",
     member: o.member ? mapMemberFromApi(o.member) : undefined,
   }
 }
@@ -234,11 +306,11 @@ export function TableDetailClient({
       ])
 
       if (membersRes.ok) {
-        const json = (await membersRes.json()) as { data?: any[] }
+        const json = (await membersRes.json()) as ApiListResponse<ApiTableMember>
         if (json.data) setMembers(json.data.map(mapMemberFromApi))
       }
       if (ordersRes.ok) {
-        const json = (await ordersRes.json()) as { data?: any[] }
+        const json = (await ordersRes.json()) as ApiListResponse<ApiOrder>
         if (json.data) setOrders(json.data.map(mapOrderFromApi))
       }
     } catch (err) {
@@ -310,7 +382,7 @@ export function TableDetailClient({
 
     try {
       const lineTotal = price * qty
-      let inserts: any[]
+      let inserts: OrderInsert[]
 
       if (selectedMembers.length === 1) {
         inserts = [{
@@ -351,7 +423,7 @@ export function TableDetailClient({
 
       const refreshed = await fetch(`/api/orders?tableId=${table.id}`, { headers: getApiHeaders() })
       if (refreshed.ok) {
-        const json = (await refreshed.json()) as { data?: any[] }
+        const json = (await refreshed.json()) as ApiListResponse<ApiOrder>
         if (json.data) setOrders(json.data.map(mapOrderFromApi))
       }
     } catch (error) {
@@ -413,7 +485,7 @@ export function TableDetailClient({
 
       const refreshed = await fetch(`/api/orders?tableId=${table.id}`, { headers: getApiHeaders() })
       if (refreshed.ok) {
-        const json = (await refreshed.json()) as { data?: any[] }
+        const json = (await refreshed.json()) as ApiListResponse<ApiOrder>
         if (json.data) setOrders(json.data.map(mapOrderFromApi))
       }
     } catch (error) {
@@ -502,7 +574,7 @@ export function TableDetailClient({
 
       const refreshed = await fetch(`/api/orders?tableId=${table.id}`, { headers: getApiHeaders() })
       if (refreshed.ok) {
-        const json = (await refreshed.json()) as { data?: any[] }
+        const json = (await refreshed.json()) as ApiListResponse<ApiOrder>
         if (json.data) setOrders(json.data.map(mapOrderFromApi))
       }
     } catch (error) {
@@ -648,7 +720,7 @@ export function TableDetailClient({
       // Refresh members
       const refreshed = await fetch(`/api/table-members?tableId=${table.id}`, { headers: getApiHeaders() })
       if (refreshed.ok) {
-        const json = (await refreshed.json()) as { data?: any[] }
+        const json = (await refreshed.json()) as ApiListResponse<ApiTableMember>
         if (json.data) setMembers(json.data.map(mapMemberFromApi))
       }
     } catch (error) {

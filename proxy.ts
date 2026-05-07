@@ -1,7 +1,8 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 
 const PROTECTED_PREFIXES = ["/settings"];
+const NO_STORE_PREFIXES = ["/auth", "/group", "/settings"];
 
 function buildCsp(nonce: string) {
   // ホワイトリスト方式: NODE_ENV が "development" のとき "だけ" 緩和する。
@@ -33,11 +34,12 @@ function buildCsp(nonce: string) {
   return csp;
 }
 
-export default auth((req) => {
+export const proxy = auth((req) => {
   const { pathname } = req.nextUrl;
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
   const csp = buildCsp(nonce);
   const isProtected = PROTECTED_PREFIXES.some((p) => pathname.startsWith(p));
+  const isNoStore = NO_STORE_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
   const isAuthenticated = !!req.auth;
 
   if (isProtected && !isAuthenticated) {
@@ -49,6 +51,9 @@ export default auth((req) => {
     const redirectRes = NextResponse.redirect(url.toString());
     redirectRes.headers.set("Content-Security-Policy", csp);
     redirectRes.headers.set("x-nonce", nonce);
+    if (isNoStore) {
+      redirectRes.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+    }
     return redirectRes;
   }
 
@@ -60,6 +65,9 @@ export default auth((req) => {
   });
   res.headers.set("Content-Security-Policy", csp);
   res.headers.set("x-nonce", nonce);
+  if (isNoStore) {
+    res.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+  }
   return res;
 });
 

@@ -6,6 +6,10 @@ import { eq, and, isNull } from "drizzle-orm";
 import { resolveUserIdFromGuestToken } from "@/lib/auth/permissions";
 import { tableEvents } from "@/lib/events/table-events";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 async function resolveUserId(request: Request): Promise<string | null> {
   const session = await auth();
 
@@ -51,8 +55,8 @@ export async function PATCH(
   }
 
   const { id: orderId } = await params;
-  const body = await request.json().catch(() => ({}));
-  const updates = body && typeof body === "object" ? ((body as any).updates ?? body) : {};
+  const body = (await request.json().catch(() => null)) as unknown;
+  const updates = isRecord(body) && isRecord(body.updates) ? body.updates : isRecord(body) ? body : {};
 
   if (!orderId) {
     return NextResponse.json({ error: "Invalid payload: order id is required" }, { status: 400 });
@@ -97,6 +101,14 @@ export async function PATCH(
 
   const unitPrice = updates.unit_price !== undefined ? Number(updates.unit_price) : order.unitPrice;
   const quantity = updates.quantity !== undefined ? Number(updates.quantity) : order.quantity;
+  let itemName = order.itemName ?? null;
+
+  if (updates.item_name !== undefined) {
+    if (updates.item_name !== null && typeof updates.item_name !== "string") {
+      return NextResponse.json({ error: "item_name が不正です" }, { status: 400 });
+    }
+    itemName = updates.item_name;
+  }
 
   if (!Number.isFinite(unitPrice) || unitPrice < 0 || unitPrice > 10_000_000) {
     return NextResponse.json({ error: "金額が不正です" }, { status: 400 });
@@ -133,7 +145,7 @@ export async function PATCH(
       .update(orders)
       .set({
         memberId: nextMemberId,
-        itemName: updates.item_name ?? order.itemName ?? null,
+        itemName,
         unitPrice,
         quantity,
         lineTotal: unitPrice * quantity,

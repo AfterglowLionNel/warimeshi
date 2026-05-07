@@ -139,7 +139,6 @@ export default function RootLayout({
           // next/script の beforeInteractive は CSP nonce のハイドレーション不整合を起こすので、
           // プレーンな <script> を使う。
           <script
-            // eslint-disable-next-line react/no-danger
             dangerouslySetInnerHTML={{
               __html: `(function(){
                 if(!('serviceWorker' in navigator)) return;

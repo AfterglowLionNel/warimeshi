@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ArrowLeft, Users, Calendar, Loader2, Lock, Archive } from "lucide-react";
 import { toast } from "sonner";
-import { getGuestToken, getGuestUserId, setGuestSession, hasGuestSession } from "@/lib/guest/guest-session";
+import { getGuestToken, getGuestUserId, setGuestSession } from "@/lib/guest/guest-session";
 
 interface TableData {
   id: string;
@@ -34,13 +34,16 @@ interface JoinTablePageClientProps {
   error?: string;
 }
 
+interface MemberLookup {
+  userId: string | null;
+}
+
 export function JoinTablePageClient({ table, token, memberCount = 0, ownerName = "作成者", requiresPassword = false, error }: JoinTablePageClientProps) {
   const [displayName, setDisplayName] = useState("");
   const [invitePassword, setInvitePassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isGuest, setIsGuest] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -59,15 +62,14 @@ export function JoinTablePageClient({ table, token, memberCount = 0, ownerName =
         if (res.ok) {
           const data = await res.json();
           setIsAuthenticated(true);
-          setIsGuest(true);
           setDisplayName(data.nickname || "");
           headers["X-Guest-Token"] = guestToken;
 
           // 既にメンバーかチェック → メンバーならテーブル詳細へリダイレクト
           const membersRes = await fetch(`/api/table-members?tableId=${table.id}`, { headers });
           if (membersRes.ok) {
-            const membersData = await membersRes.json();
-            const isMember = membersData.data?.some((m: any) => m.userId === data.userId);
+            const membersData = (await membersRes.json()) as { data?: MemberLookup[] };
+            const isMember = membersData.data?.some((m) => m.userId === data.userId);
             if (isMember) {
               router.push(`/group/table/${token}`);
               return;
@@ -83,14 +85,13 @@ export function JoinTablePageClient({ table, token, memberCount = 0, ownerName =
       if (res.ok) {
         const data = await res.json();
         setIsAuthenticated(true);
-        setIsGuest(false);
         setDisplayName(data.nickname || data.email?.split("@")[0] || "");
 
         // 既にメンバーかチェック → メンバーならテーブル詳細へリダイレクト
         const membersRes = await fetch(`/api/table-members?tableId=${table.id}`);
         if (membersRes.ok) {
-          const membersData = await membersRes.json();
-          const isMember = membersData.data?.some((m: any) => m.userId === data.id);
+          const membersData = (await membersRes.json()) as { data?: MemberLookup[] };
+          const isMember = membersData.data?.some((m) => m.userId === data.id);
           if (isMember) {
             router.push(`/group/table/${token}`);
             return;

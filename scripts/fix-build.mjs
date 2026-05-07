@@ -7,7 +7,7 @@
  * Run after `next build` and before `next start`.
  */
 import { readFileSync, writeFileSync, existsSync, symlinkSync, unlinkSync, readdirSync, statSync } from 'fs'
-import { join, basename } from 'path'
+import { join } from 'path'
 import { execSync } from 'child_process'
 
 const NEXT_DIR = join(process.cwd(), '.next')
@@ -53,8 +53,6 @@ if (!existsSync(manifestPath)) {
   console.error('[fix-build] Cannot find client-reference-manifest')
   process.exit(1)
 }
-const manifest = readFileSync(manifestPath, 'utf8')
-
 // Get existing chunks on disk
 const existingChunks = readdirSync(CHUNKS_DIR).filter(f => {
   const s = statSync(join(CHUNKS_DIR, f))

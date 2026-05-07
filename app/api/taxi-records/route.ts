@@ -11,8 +11,8 @@ type TaxiRecordPayload = {
   vehicleType: VehicleType;
   mode: CalculationMode;
   settings: FareSettings;
-  input: any;
-  result: any;
+  input: Record<string, unknown>;
+  result: Record<string, unknown>;
 };
 
 export async function POST(request: Request) {

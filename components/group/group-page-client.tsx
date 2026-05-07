@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { LogoutButton } from "@/components/auth/logout-control";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -85,7 +86,6 @@ export function GroupPageClient({ serverUser, serverTables }: GroupPageClientPro
   const [tables, setTables] = useState<TableData[]>(serverTables);
   const [isLoading, setIsLoading] = useState(!serverUser);
   const [isGuest, setIsGuest] = useState(false);
-  const _router = useRouter();
 
   const fetchGuestData = useCallback(async () => {
     const guestToken = getGuestToken();
@@ -281,11 +281,7 @@ export function GroupPageClient({ serverUser, serverTables }: GroupPageClientPro
                         <Settings className="h-4 w-4" />
                       </Link>
                     </Button>
-                    <Button asChild variant="outline" size="sm">
-                      <Link href="/auth/logout" prefetch={false}>
-                        <LogOut className="h-4 w-4" />
-                      </Link>
-                    </Button>
+                    <LogoutButton variant="outline" size="sm" iconOnly />
                   </>
                 )}
               </div>
@@ -343,7 +339,6 @@ export function GroupPageClient({ serverUser, serverTables }: GroupPageClientPro
 function GuestLoginPrompt() {
   const [isCreatingGuest, setIsCreatingGuest] = useState(false);
   const [guestName, setGuestName] = useState("");
-  const _router = useRouter();
 
   const handleStartAsGuest = async () => {
     setIsCreatingGuest(true);

@@ -20,7 +20,6 @@ export default function CreateTablePage() {
   const [displayName, setDisplayName] = useState("");
   const [usePassword, setUsePassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [isGuest, setIsGuest] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -28,7 +27,6 @@ export default function CreateTablePage() {
       const guestToken = getGuestToken();
 
       if (guestToken) {
-        setIsGuest(true);
         const res = await fetch(`/api/auth/guest?token=${encodeURIComponent(guestToken)}`);
         if (res.ok) {
           const data = await res.json();
@@ -39,7 +37,11 @@ export default function CreateTablePage() {
 
       const res = await fetch("/api/users/profile");
       if (!res.ok) return;
-      const json = (await res.json()) as { nickname?: string | null; email?: string | null; userMetadata?: any };
+      const json = (await res.json()) as {
+        nickname?: string | null;
+        email?: string | null;
+        userMetadata?: { nickname?: string | null; name?: string | null } | null;
+      };
       const fallback =
         json.userMetadata?.nickname || json.userMetadata?.name || (json.email ? json.email.split("@")[0] : "") || "";
       const suggested = json.nickname || fallback;
@@ -80,7 +82,6 @@ export default function CreateTablePage() {
           const guestData = await guestRes.json();
           setGuestSession(guestData.guestToken, guestData.userId);
           guestToken = guestData.guestToken;
-          setIsGuest(true);
         }
       }
 

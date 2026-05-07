@@ -1,7 +1,29 @@
 // バージョンを bump すると activate イベントで古い cache が一掃される。
 // デザインリプレースなど大きな UI 変更時に必ず番号を上げること。
-const CACHE_NAME = "warimeshi-v3-redesign"
+const CACHE_NAME = "warimeshi-v4-auth-cache"
 const STATIC_ASSETS = ["/offline.html"]
+const NETWORK_ONLY_PREFIXES = ["/api/", "/auth", "/group", "/settings"]
+
+function isNetworkOnlyPath(pathname) {
+  return NETWORK_ONLY_PREFIXES.some((prefix) => {
+    if (prefix.endsWith("/")) return pathname.startsWith(prefix)
+    return pathname === prefix || pathname.startsWith(`${prefix}/`)
+  })
+}
+
+function isNextRouterRequest(request, url) {
+  return (
+    request.headers.get("RSC") === "1" ||
+    request.headers.has("Next-Router-State-Tree") ||
+    request.headers.has("Next-Router-Prefetch") ||
+    url.searchParams.has("_rsc")
+  )
+}
+
+function shouldCacheResponse(response) {
+  const cacheControl = response.headers.get("cache-control") || ""
+  return response.ok && !cacheControl.includes("no-store") && !cacheControl.includes("private")
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -26,11 +48,14 @@ self.addEventListener("fetch", (event) => {
   // Skip non-GET requests
   if (request.method !== "GET") return
 
+  // Never cache cross-origin responses or Next.js router payloads.
+  if (url.origin !== self.location.origin) return
+
   // Skip SSE connections
   if (url.pathname.includes("/events")) return
 
-  // API requests: network only, no caching (security: avoid caching authenticated responses)
-  if (url.pathname.startsWith("/api/")) {
+  // Auth-sensitive pages/API and RSC payloads must be network-only.
+  if (isNetworkOnlyPath(url.pathname) || isNextRouterRequest(request, url)) {
     event.respondWith(fetch(request))
     return
   }
@@ -41,7 +66,7 @@ self.addEventListener("fetch", (event) => {
       caches.match(request).then((cached) => {
         if (cached) return cached
         return fetch(request).then((response) => {
-          if (response.ok) {
+          if (shouldCacheResponse(response)) {
             const clone = response.clone()
             caches.open(CACHE_NAME).then((cache) => cache.put(request, clone))
           }
@@ -64,7 +89,7 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     caches.match(request).then((cached) => {
       const fetchPromise = fetch(request).then((response) => {
-        if (response.ok) {
+        if (shouldCacheResponse(response)) {
           const clone = response.clone()
           caches.open(CACHE_NAME).then((cache) => cache.put(request, clone))
         }

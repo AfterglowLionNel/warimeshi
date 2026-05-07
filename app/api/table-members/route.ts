@@ -6,6 +6,7 @@ import { eq, asc, and } from "drizzle-orm";
 import { resolveUserIdFromGuestToken } from "@/lib/auth/permissions";
 import { tableEvents } from "@/lib/events/table-events";
 import bcrypt from "bcryptjs";
+import { decryptInvitePassword, isEncryptedInvitePassword } from "@/lib/crypto/invite-password";
 import { clientKey, rateLimit, rateLimitHeaders } from "@/lib/security/rate-limit";
 import { z } from "zod";
 
@@ -132,11 +133,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "招待パスワードが正しくありません" }, { status: 403 });
     }
     const normalizedInput = invitePassword.trim().toUpperCase();
-    // bcrypt ハッシュ（$2で始まる）か平文かを判定して検証
-    const isHashed = table.invitePassword.startsWith("$2");
-    const isValid = isHashed
-      ? await bcrypt.compare(normalizedInput, table.invitePassword)
-      : normalizedInput === table.invitePassword.toUpperCase();
+    let isValid = false;
+    if (isEncryptedInvitePassword(table.invitePassword)) {
+      const decrypted = decryptInvitePassword(table.invitePassword);
+      isValid = decrypted !== null && normalizedInput === decrypted.toUpperCase();
+    } else if (table.invitePassword.startsWith("$2")) {
+      // 旧 bcrypt 形式 (移行期間用に残置)
+      isValid = await bcrypt.compare(normalizedInput, table.invitePassword);
+    } else {
+      // 旧平文形式 (移行期間用に残置)
+      isValid = normalizedInput === table.invitePassword.toUpperCase();
+    }
     if (!isValid) {
       return NextResponse.json({ error: "招待パスワードが正しくありません" }, { status: 403 });
     }

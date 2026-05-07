@@ -121,7 +121,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     // allowDangerousEmailAccountLinking は無効。
     // true にすると、攻撃者が同一 email で別 Provider のアカウントを作るだけで
     // 既存ユーザーのデータにログインできてしまう (NextAuth が明示的に "dangerous" と命名)。
-    Google({}),
+    Google({
+      authorization: {
+        params: {
+          scope: "openid email",
+          prompt: "select_account",
+        },
+      },
+    }),
     LineProvider(),
   ],
 });

@@ -187,4 +187,4 @@ pnpm test
 
 ## ライセンス
 
-All Rights Reserved. 本リポジトリのコードを許可なく利用・複製・配布することは禁止します。
+All Rights Reserved. 本リポジトリのコードを許可なく利用・複製・配布することは禁止します。詳細は [LICENSE](./LICENSE) を参照してください。

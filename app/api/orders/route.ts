@@ -6,6 +6,7 @@ import { eq, and, isNull, desc, inArray } from "drizzle-orm";
 import { resolveUserIdFromGuestToken } from "@/lib/auth/permissions";
 import { tableEvents } from "@/lib/events/table-events";
 import { requireSameOrigin } from "@/lib/security/origin-check";
+import { clientKey, rateLimit, rateLimitHeaders } from "@/lib/security/rate-limit";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 
@@ -76,6 +77,15 @@ async function isUserTableMemberDirect(userId: string, tableId: string): Promise
 export async function POST(request: Request) {
   const originFail = requireSameOrigin(request);
   if (originFail) return originFail;
+
+  // 注文作成は IP あたり 1 分 60 回まで
+  const limit = await rateLimit(clientKey(request, "order-create"), { windowSec: 60, max: 60 });
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: "操作が早すぎます。少し待ってからお試しください。" },
+      { status: 429, headers: rateLimitHeaders(limit) },
+    );
+  }
 
   const { userId } = await resolveUserId(request);
 

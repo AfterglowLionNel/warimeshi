@@ -85,7 +85,7 @@ export async function POST(request: Request) {
   const { tableId, displayName, invitePassword, isGuest } = parsed.data;
 
   // 招待パスワード総当たり対策: 同一 IP + 同一テーブルへの参加試行を 1 分 10 回まで
-  const limit = rateLimit(clientKey(request, `member-join:${tableId}`), { windowSec: 60, max: 10 });
+  const limit = await rateLimit(clientKey(request, `member-join:${tableId}`), { windowSec: 60, max: 10 });
   if (!limit.allowed) {
     return NextResponse.json(
       { error: "試行回数が多すぎます。しばらく経ってから再度お試しください。" },

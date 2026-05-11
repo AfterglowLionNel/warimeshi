@@ -1,8 +1,13 @@
 import "server-only";
 
-// シンプルな in-memory sliding window レート制限。
-// 単一プロセス前提 (Next.js dev / pm2 単一インスタンス)。
-// 複数インスタンス本番では Redis などに置き換えること。
+import { Ratelimit } from "@upstash/ratelimit";
+import { Redis } from "@upstash/redis";
+
+// Sliding-window レート制限。
+//
+// 環境変数 UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN が設定されている場合は
+// Upstash Redis (@upstash/ratelimit) を使う。複数プロセス・本番デプロイで正しく動く。
+// 設定が無い場合 (dev / test) は in-memory フォールバックを使う。
 
 type Key = string;
 
@@ -44,18 +49,53 @@ export interface RateLimitOptions {
   max: number;
 }
 
-/**
- * `key` に対し sliding window で rate limit を判定する。
- * 同じ key + windowSec で複数回呼ぶと累積する。
- */
-export function rateLimit(key: Key, opts: RateLimitOptions): RateLimitResult {
+// ---------- Upstash バックエンド ----------
+
+let upstashRedis: Redis | null | undefined;
+
+function getUpstashRedis(): Redis | null {
+  if (upstashRedis !== undefined) return upstashRedis;
+
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) {
+    upstashRedis = null;
+    return null;
+  }
+  upstashRedis = new Redis({ url, token });
+  return upstashRedis;
+}
+
+// Ratelimit インスタンスは (max, windowSec) ごとにキャッシュする。
+const ratelimitCache = new Map<string, Ratelimit>();
+
+function getRatelimit(opts: RateLimitOptions): Ratelimit | null {
+  const redis = getUpstashRedis();
+  if (!redis) return null;
+
+  const cacheKey = `${opts.max}:${opts.windowSec}`;
+  const cached = ratelimitCache.get(cacheKey);
+  if (cached) return cached;
+
+  const rl = new Ratelimit({
+    redis,
+    limiter: Ratelimit.slidingWindow(opts.max, `${opts.windowSec} s`),
+    prefix: "wm-rl",
+    analytics: false,
+  });
+  ratelimitCache.set(cacheKey, rl);
+  return rl;
+}
+
+// ---------- in-memory フォールバック ----------
+
+function rateLimitInMemory(key: Key, opts: RateLimitOptions): RateLimitResult {
   ensureSweeper();
   const now = Date.now();
   const windowMs = opts.windowSec * 1000;
   const cutoff = now - windowMs;
 
   const bucket = buckets.get(key) ?? { hits: [] };
-  // 古いヒットを落とす
   bucket.hits = bucket.hits.filter((t) => t > cutoff);
 
   if (bucket.hits.length >= opts.max) {
@@ -75,6 +115,28 @@ export function rateLimit(key: Key, opts: RateLimitOptions): RateLimitResult {
     remaining: opts.max - bucket.hits.length,
     retryAfterSec: 0,
   };
+}
+
+// ---------- 公開 API ----------
+
+/**
+ * `key` に対し sliding window で rate limit を判定する。
+ * 同じ key + windowSec で複数回呼ぶと累積する。
+ *
+ * UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN が設定されていれば Redis を使う。
+ * そうでない場合は in-memory バックエンド (単一プロセス前提) を使う。
+ */
+export async function rateLimit(key: Key, opts: RateLimitOptions): Promise<RateLimitResult> {
+  const rl = getRatelimit(opts);
+  if (rl) {
+    const r = await rl.limit(key);
+    return {
+      allowed: r.success,
+      remaining: Math.max(0, r.remaining),
+      retryAfterSec: Math.max(0, Math.ceil((r.reset - Date.now()) / 1000)),
+    };
+  }
+  return rateLimitInMemory(key, opts);
 }
 
 /** クライアント識別子: x-forwarded-for の最初の IP、無ければ "unknown" */

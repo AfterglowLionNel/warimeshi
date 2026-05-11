@@ -13,12 +13,11 @@ interface TableEvent {
 
 interface UseTableEventsOptions {
   tableId: string
-  token?: string
   onEvent: (event: TableEvent) => void
   fallbackInterval?: number
 }
 
-export function useTableEvents({ tableId, token, onEvent, fallbackInterval = 10000 }: UseTableEventsOptions) {
+export function useTableEvents({ tableId, onEvent, fallbackInterval = 10000 }: UseTableEventsOptions) {
   const [connected, setConnected] = useState(false)
   const eventSourceRef = useRef<EventSource | null>(null)
   const fallbackRef = useRef<NodeJS.Timeout | null>(null)
@@ -30,10 +29,9 @@ export function useTableEvents({ tableId, token, onEvent, fallbackInterval = 100
   const startSSE = useCallback(() => {
     if (!tableId) return
 
-    const params = new URLSearchParams()
-    if (token) params.set("token", token)
-
-    const url = `/api/tables/${tableId}/events${params.toString() ? `?${params}` : ""}`
+    // ゲストトークンは HttpOnly Cookie で送られる (同一オリジンなので自動付与)。
+    // URL クエリでトークンを渡すと Nginx / Next.js のアクセスログに残るため、Cookie を採用。
+    const url = `/api/tables/${tableId}/events`
     const es = new EventSource(url)
     eventSourceRef.current = es
 
@@ -78,7 +76,7 @@ export function useTableEvents({ tableId, token, onEvent, fallbackInterval = 100
         }
       }, delay)
     }
-  }, [tableId, token, fallbackInterval])
+  }, [tableId, fallbackInterval])
 
   useEffect(() => {
     startSSE()

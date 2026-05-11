@@ -6,6 +6,7 @@ import { eq, and, isNull } from "drizzle-orm"
 import { resolveUserIdFromGuestToken } from "@/lib/auth/permissions"
 import { tableEvents } from "@/lib/events/table-events"
 import { requireSameOrigin } from "@/lib/security/origin-check"
+import { clientKey, rateLimit, rateLimitHeaders } from "@/lib/security/rate-limit"
 
 // Round up to nearest 10 yen
 const roundUp10 = (n: number) => Math.ceil(n / 10) * 10
@@ -161,6 +162,15 @@ async function resolveUserId(request: Request): Promise<string | null> {
 export async function POST(request: Request) {
   const originFail = requireSameOrigin(request)
   if (originFail) return originFail
+
+  // 会計確定は IP あたり 1 分 30 回まで
+  const limit = await rateLimit(clientKey(request, "payment-create"), { windowSec: 60, max: 30 })
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: "操作が早すぎます。少し待ってからお試しください。" },
+      { status: 429, headers: rateLimitHeaders(limit) },
+    )
+  }
 
   const userId = await resolveUserId(request)
   if (!userId) {

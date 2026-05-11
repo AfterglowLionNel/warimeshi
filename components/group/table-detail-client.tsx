@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import type { Order, Table, TableMember, User } from "@/lib/types/group"
 import { useTableEvents } from "@/lib/hooks/use-table-events"
@@ -59,6 +59,7 @@ import { toast } from "sonner"
 import { InviteQRCode } from "./invite-qr-code"
 import { InviteShareButton } from "./invite-share-button"
 import { getGuestToken } from "@/lib/guest/guest-session"
+import { useFunAdjustmentRoulette, type RouletteResult } from "./use-fun-adjustment-roulette"
 
 interface TableDetailClientProps {
   table: Table
@@ -160,26 +161,6 @@ type FunAdjustment = {
 
 const ITEMS_PER_PAGE = 10
 const MEMBER_COLORS = ["#e0f2fe", "#fef9c3", "#ede9fe", "#dcfce7", "#f1f5f9", "#ffe4e6", "#dbeafe", "#fee2e2"]
-const ROULETTE_ITEM_WIDTH = 128
-const ROULETTE_DURATION_MS = 7800
-const ROULETTE_LOOP_COUNT = 38
-
-function easeRoulette(progress: number) {
-  const decelStart = 0.48
-  const creepStart = 0.84
-  const fastDistance = 0.82
-  const creepDistance = 0.985
-
-  if (progress < decelStart) return (fastDistance / decelStart) * progress
-
-  if (progress < creepStart) {
-    const p = (progress - decelStart) / (creepStart - decelStart)
-    return fastDistance + (creepDistance - fastDistance) * (1 - Math.pow(1 - p, 2.2))
-  }
-
-  const p = (progress - creepStart) / (1 - creepStart)
-  return creepDistance + (1 - creepDistance) * (1 - Math.pow(1 - p, 3.8))
-}
 
 function normalizeFunAdjustment(value: unknown): FunAdjustment {
   if (!value || typeof value !== "object") return { type: "none" }
@@ -305,16 +286,27 @@ export function TableDetailClient({
   const [exemptMemberId, setExemptMemberId] = useState<string | null>(null)
   const [showFunAdjustments, setShowFunAdjustments] = useState(false)
   const [funAdjustment, setFunAdjustment] = useState<FunAdjustment>({ type: "none" })
-  const [spinningAdjustmentType, setSpinningAdjustmentType] = useState<
-    "remainder_roulette" | "lucky_discount" | "full_burden_roulette" | null
-  >(null)
-  const [roulettePreviewMemberId, setRoulettePreviewMemberId] = useState<string | null>(null)
-  const [roulettePreviewSlotIndex, setRoulettePreviewSlotIndex] = useState<number | null>(null)
-  const [rouletteOffset, setRouletteOffset] = useState(ROULETTE_ITEM_WIDTH / 2)
-  const [rouletteConfettiBurst, setRouletteConfettiBurst] = useState(false)
-  const rouletteFrameRef = useRef<number | null>(null)
-  const rouletteFinishTimeoutRef = useRef<number | null>(null)
-  const rouletteConfettiTimeoutRef = useRef<number | null>(null)
+  const handleRouletteResult = useCallback((result: RouletteResult) => {
+    setFunAdjustment({
+      type: result.type,
+      targetMemberId: result.targetMemberId,
+      amount: result.amount,
+    })
+  }, [])
+  const {
+    spinningAdjustmentType,
+    roulettePreviewMemberId,
+    roulettePreviewSlotIndex,
+    rouletteOffset,
+    rouletteConfettiBurst,
+    rouletteCandidates,
+    rouletteMembers,
+    runRandomFunAdjustment,
+  } = useFunAdjustmentRoulette({
+    members,
+    exemptMemberId,
+    onResult: handleRouletteResult,
+  })
 
   // Guest member state
   const [showGuestForm, setShowGuestForm] = useState(false)
@@ -388,10 +380,9 @@ export function TableDetailClient({
   }, [table.id])
 
   // SSE real-time updates (with polling fallback)
-  const guestToken = getGuestToken()
+  // ゲストトークンは HttpOnly Cookie から自動送信されるため、URL クエリでは渡さない。
   useTableEvents({
     tableId: table.id,
-    token: guestToken ?? undefined,
     onEvent: useCallback(() => {
       fetchUpdates()
     }, [fetchUpdates]),
@@ -897,105 +888,9 @@ export function TableDetailClient({
     return { totalQuantity, totalAmount, byMember }
   }, [orders, members])
 
-  const rouletteCandidates = useMemo(
-    () => members.filter((member) => member.id !== exemptMemberId),
-    [members, exemptMemberId],
-  )
-
-  const runRandomFunAdjustment = (type: "remainder_roulette" | "lucky_discount" | "full_burden_roulette") => {
-    if (rouletteCandidates.length === 0 || spinningAdjustmentType) return
-
-    if (rouletteFrameRef.current !== null) {
-      window.cancelAnimationFrame(rouletteFrameRef.current)
-      rouletteFrameRef.current = null
-    }
-    if (rouletteFinishTimeoutRef.current !== null) {
-      window.clearTimeout(rouletteFinishTimeoutRef.current)
-      rouletteFinishTimeoutRef.current = null
-    }
-    if (rouletteConfettiTimeoutRef.current !== null) {
-      window.clearTimeout(rouletteConfettiTimeoutRef.current)
-      rouletteConfettiTimeoutRef.current = null
-    }
-
-    const targetIndex = Math.floor(Math.random() * rouletteCandidates.length)
-    const targetMember = rouletteCandidates[targetIndex]
-    if (!targetMember) return
-
-    const startOffset = ROULETTE_ITEM_WIDTH / 2
-    const targetLoop = Math.max(4, ROULETTE_LOOP_COUNT - 2)
-    const targetSlotIndex = targetLoop * rouletteCandidates.length + targetIndex
-    const endOffset = targetSlotIndex * ROULETTE_ITEM_WIDTH + ROULETTE_ITEM_WIDTH / 2
-    let startedAt: number | null = null
-
-    setSpinningAdjustmentType(type)
-    setRouletteOffset(startOffset)
-    setRouletteConfettiBurst(false)
-    setRoulettePreviewMemberId(rouletteCandidates[0]?.id ?? null)
-    setRoulettePreviewSlotIndex(0)
-
-    const animate = (timestamp: number) => {
-      if (startedAt === null) startedAt = timestamp
-      const progress = Math.min(1, (timestamp - startedAt) / ROULETTE_DURATION_MS)
-      const easedProgress = easeRoulette(progress)
-      const nextOffset = startOffset + (endOffset - startOffset) * easedProgress
-      const centeredSlotIndex = Math.max(0, Math.round((nextOffset - ROULETTE_ITEM_WIDTH / 2) / ROULETTE_ITEM_WIDTH))
-      const previewMember = rouletteCandidates[centeredSlotIndex % rouletteCandidates.length]
-
-      setRouletteOffset(nextOffset)
-      setRoulettePreviewSlotIndex(centeredSlotIndex)
-      if (previewMember) setRoulettePreviewMemberId(previewMember.id)
-
-      if (progress < 1) {
-        rouletteFrameRef.current = window.requestAnimationFrame(animate)
-      } else {
-        setRouletteOffset(endOffset)
-        setRoulettePreviewMemberId(targetMember.id)
-        setRoulettePreviewSlotIndex(targetSlotIndex)
-        setFunAdjustment({
-          type,
-          targetMemberId: targetMember.id,
-          amount: type === "lucky_discount" ? 500 : undefined,
-        })
-        rouletteFrameRef.current = null
-        rouletteFinishTimeoutRef.current = window.setTimeout(() => {
-          setRoulettePreviewMemberId(null)
-          setRoulettePreviewSlotIndex(null)
-          setSpinningAdjustmentType(null)
-          setRouletteConfettiBurst(true)
-          rouletteFinishTimeoutRef.current = null
-          rouletteConfettiTimeoutRef.current = window.setTimeout(() => {
-            setRouletteConfettiBurst(false)
-            rouletteConfettiTimeoutRef.current = null
-          }, 1900)
-        }, 900)
-      }
-    }
-
-    rouletteFrameRef.current = window.requestAnimationFrame(animate)
-  }
-
-  useEffect(() => {
-    return () => {
-      if (rouletteFrameRef.current !== null) {
-        window.cancelAnimationFrame(rouletteFrameRef.current)
-      }
-      if (rouletteFinishTimeoutRef.current !== null) {
-        window.clearTimeout(rouletteFinishTimeoutRef.current)
-      }
-      if (rouletteConfettiTimeoutRef.current !== null) {
-        window.clearTimeout(rouletteConfettiTimeoutRef.current)
-      }
-    }
-  }, [])
-
   const selectedFunTarget = members.find((m) => m.id === funAdjustment.targetMemberId)
   const selectedExemptMember = members.find((m) => m.id === exemptMemberId)
   const roulettePreviewMember = members.find((m) => m.id === roulettePreviewMemberId)
-  const rouletteMembers = useMemo(() => {
-    if (rouletteCandidates.length === 0) return []
-    return Array.from({ length: ROULETTE_LOOP_COUNT }, () => rouletteCandidates).flat()
-  }, [rouletteCandidates])
   const funAdjustmentSummary = (() => {
     if (funAdjustment.type === "none" || !selectedFunTarget) return null
     if (funAdjustment.type === "remainder_roulette") {

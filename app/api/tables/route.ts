@@ -7,6 +7,7 @@ import { generateInviteToken } from "@/lib/utils/invite-token";
 import { resolveUserIdFromGuestToken } from "@/lib/auth/permissions";
 import { encryptInvitePassword } from "@/lib/crypto/invite-password";
 import { requireSameOrigin } from "@/lib/security/origin-check";
+import { clientKey, rateLimit, rateLimitHeaders } from "@/lib/security/rate-limit";
 import { z } from "zod";
 
 const createTableSchema = z
@@ -93,6 +94,15 @@ function generateInvitePassword(length = 4): string {
 export async function POST(request: Request) {
   const originFail = requireSameOrigin(request);
   if (originFail) return originFail;
+
+  // テーブル作成は IP あたり 1 時間 30 回まで (量産防止)
+  const limit = await rateLimit(clientKey(request, "table-create"), { windowSec: 3600, max: 30 });
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: "テーブル作成の試行回数が上限に達しました。しばらく経ってからお試しください。" },
+      { status: 429, headers: rateLimitHeaders(limit) },
+    );
+  }
 
   const { userId, isGuest } = await resolveUserId(request);
 

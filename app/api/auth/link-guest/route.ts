@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { users, tables, tableMembers, orders } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { requireSameOrigin } from "@/lib/security/origin-check";
+import { clientKey, rateLimit, rateLimitHeaders } from "@/lib/security/rate-limit";
 
 const GUEST_COOKIE_NAME = "wm_guest_token";
 
@@ -17,6 +18,15 @@ const postSchema = z.object({
 export async function POST(request: Request) {
   const originFail = requireSameOrigin(request);
   if (originFail) return originFail;
+
+  // ゲスト紐付けは IP あたり 1 時間 10 回まで (ブルートフォース防止)
+  const limit = await rateLimit(clientKey(request, "link-guest"), { windowSec: 3600, max: 10 });
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: "試行回数が上限に達しました。しばらく経ってからお試しください。" },
+      { status: 429, headers: rateLimitHeaders(limit) },
+    );
+  }
 
   const session = await auth();
 

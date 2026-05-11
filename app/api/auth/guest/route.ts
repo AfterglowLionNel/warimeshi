@@ -19,7 +19,7 @@ export async function POST(request: Request) {
   if (originFail) return originFail;
 
   // ゲスト作成は IP あたり 1 時間 5 回まで (大量生成 / DoS 防止)
-  const limit = rateLimit(clientKey(request, "guest-create"), { windowSec: 3600, max: 5 });
+  const limit = await rateLimit(clientKey(request, "guest-create"), { windowSec: 3600, max: 5 });
   if (!limit.allowed) {
     return NextResponse.json(
       { error: "ゲスト作成の試行回数が上限に達しました。しばらく経ってからお試しください。" },

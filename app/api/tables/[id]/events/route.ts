@@ -1,3 +1,4 @@
+import { cookies } from "next/headers"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { users, tableMembers } from "@/lib/db/schema"
@@ -5,7 +6,9 @@ import { eq, and } from "drizzle-orm"
 import { tableEvents, type TableEvent } from "@/lib/events/table-events"
 import { resolveUserIdFromGuestToken } from "@/lib/auth/permissions"
 
-async function resolveUserId(request: Request): Promise<string | null> {
+const GUEST_COOKIE_NAME = "wm_guest_token"
+
+async function resolveUserId(_request: Request): Promise<string | null> {
   const session = await auth()
 
   if (session?.user?.id) {
@@ -18,8 +21,11 @@ async function resolveUserId(request: Request): Promise<string | null> {
     if (dbUser) return dbUser.id
   }
 
-  const url = new URL(request.url)
-  const guestToken = url.searchParams.get("token")
+  // ゲストトークンは HttpOnly Cookie から読む。
+  // 以前は URL クエリ (?token=) で渡していたが、Nginx / Next.js / アクセスログに
+  // 平文で残るリスクがあったため Cookie ベースに移行した。
+  const cookieStore = await cookies()
+  const guestToken = cookieStore.get(GUEST_COOKIE_NAME)?.value
   if (guestToken) {
     const guestUserId = await resolveUserIdFromGuestToken(guestToken)
     if (guestUserId) return guestUserId

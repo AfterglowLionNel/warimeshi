@@ -473,12 +473,33 @@ export function TaxiCalculator({
         </button>
         <button
           type="button"
-          className={`wm-tab ${mode === "segments" ? "is-active" : ""}`}
           onClick={() => setMode("segments")}
+          aria-pressed={mode === "segments"}
+          className={`relative flex-1 rounded-[9px] px-2.5 py-2 text-[13px] font-bold transition ${
+            mode === "segments"
+              ? "bg-[var(--wm-accent)] text-white shadow-[var(--wm-shadow-1)]"
+              : "border border-[var(--wm-accent)]/40 bg-[var(--wm-accent-soft)] text-[var(--wm-accent-pressed)] hover:bg-[var(--wm-accent-soft)]/80"
+          }`}
         >
-          区間別
+          <span className="inline-flex items-center gap-1.5">
+            <span>区間別</span>
+            <span
+              className={`inline-flex items-center rounded-full px-1.5 py-[1px] text-[9.5px] font-extrabold tracking-wider ${
+                mode === "segments"
+                  ? "bg-white/25 text-white"
+                  : "bg-[var(--wm-accent)] text-white"
+              }`}
+            >
+              おすすめ
+            </span>
+          </span>
         </button>
       </div>
+      {mode !== "segments" && (
+        <p className="-mt-1 px-1 text-[11px] leading-relaxed text-[var(--wm-ink-3)]">
+          途中で降りる人がいる飲み会帰りなら <strong className="text-[var(--wm-accent-pressed)]">区間別</strong> が公平でおすすめです。
+        </p>
+      )}
 
       {/* メイン入力カード */}
       {mode === "total" && (

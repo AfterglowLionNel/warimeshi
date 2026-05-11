@@ -2135,8 +2135,21 @@ export function TableDetailClient({
                         </div>
                       </div>
                       <div className="wm-roulette-window relative z-10 overflow-hidden rounded-lg py-8">
-                        <div className="wm-roulette-marker pointer-events-none absolute bottom-1 left-1/2 z-30 -translate-x-1/2 text-[24px] leading-none">
-                          ▲
+                        <div
+                          className="wm-roulette-marker pointer-events-none absolute bottom-2 left-1/2 z-30 -translate-x-1/2"
+                          style={{ width: 18, height: 13 }}
+                          aria-hidden="true"
+                        >
+                          <div
+                            style={{
+                              width: 0,
+                              height: 0,
+                              borderLeft: "9px solid transparent",
+                              borderRight: "9px solid transparent",
+                              borderBottom: "13px solid #F2C14E",
+                              filter: "drop-shadow(0 0 8px rgba(242, 193, 78, 0.9))",
+                            }}
+                          />
                         </div>
                         <div className="pointer-events-none absolute inset-y-3 left-1/2 z-20 w-[3px] -translate-x-1/2 rounded-full bg-[#F2C14E]" />
                         <div

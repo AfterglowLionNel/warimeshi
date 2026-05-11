@@ -18,26 +18,38 @@ export type RouletteMemberLike = {
 }
 
 const ROULETTE_ITEM_WIDTH = 128
-const ROULETTE_DURATION_MS = 9200
+const ROULETTE_DURATION_MS = 8200
 const ROULETTE_LOOP_COUNT = 64
+// オーバーシュート (1個分行き過ぎてバウンスバック) 演出を起こす確率
+const ROULETTE_OVERSHOOT_CHANCE = 0.22
 
-function getRouletteTravel(progress: number, totalDistance: number) {
-  const brakeStart = 0.55
-  const creepStart = 0.92
-  const slowDistance = Math.min(totalDistance * 0.16, ROULETTE_ITEM_WIDTH * 9.5)
-  const creepDistance = Math.min(totalDistance * 0.04, ROULETTE_ITEM_WIDTH * 1.1)
-  const fastEnd = Math.max(0, totalDistance - slowDistance)
-  const creepStartDistance = Math.max(fastEnd, totalDistance - creepDistance)
+function getRouletteTravel(progress: number, totalDistance: number, overshoot: boolean) {
+  // フェーズ1: 高速 (0 → 0.55): 線形に近い加速で大半の距離を進む
+  const fastEnd = 0.55
+  const fastTravel = totalDistance * 0.78
 
-  if (progress < brakeStart) return fastEnd * (progress / brakeStart)
-
-  if (progress < creepStart) {
-    const p = (progress - brakeStart) / (creepStart - brakeStart)
-    return fastEnd + (creepStartDistance - fastEnd) * (1 - Math.pow(1 - p, 2.35))
+  if (progress <= fastEnd) {
+    return fastTravel * (progress / fastEnd)
   }
 
-  const p = (progress - creepStart) / (1 - creepStart)
-  return creepStartDistance + (totalDistance - creepStartDistance) * (1 - Math.pow(1 - p, 3.9))
+  // オーバーシュートなしの場合: 0.55 → 1.0 でターゲットに緩やかに着地 (cubic ease-out)
+  if (!overshoot) {
+    const p = (progress - fastEnd) / (1 - fastEnd)
+    const eased = 1 - Math.pow(1 - p, 3)
+    return fastTravel + (totalDistance - fastTravel) * eased
+  }
+
+  // オーバーシュート版: 0.55 → 0.86 でターゲットを 1 個ぶん通り越す、0.86 → 1.0 でバウンスバック
+  const overshootPeak = totalDistance + ROULETTE_ITEM_WIDTH
+  const peakProgress = 0.86
+  if (progress <= peakProgress) {
+    const p = (progress - fastEnd) / (peakProgress - fastEnd)
+    const eased = 1 - Math.pow(1 - p, 3)
+    return fastTravel + (overshootPeak - fastTravel) * eased
+  }
+  const p = (progress - peakProgress) / (1 - peakProgress)
+  const eased = 1 - Math.pow(1 - p, 2)
+  return overshootPeak + (totalDistance - overshootPeak) * eased
 }
 
 export function useFunAdjustmentRoulette<M extends RouletteMemberLike>({
@@ -104,6 +116,7 @@ export function useFunAdjustmentRoulette<M extends RouletteMemberLike>({
       const targetSlotIndex = targetLoop * rouletteCandidates.length + targetIndex
       const endOffset = targetSlotIndex * ROULETTE_ITEM_WIDTH + ROULETTE_ITEM_WIDTH / 2
       const totalDistance = endOffset - startOffset
+      const overshoot = Math.random() < ROULETTE_OVERSHOOT_CHANCE
       let startedAt: number | null = null
 
       setSpinningAdjustmentType(type)
@@ -115,7 +128,7 @@ export function useFunAdjustmentRoulette<M extends RouletteMemberLike>({
       const animate = (timestamp: number) => {
         if (startedAt === null) startedAt = timestamp
         const progress = Math.min(1, (timestamp - startedAt) / ROULETTE_DURATION_MS)
-        const nextOffset = startOffset + getRouletteTravel(progress, totalDistance)
+        const nextOffset = startOffset + getRouletteTravel(progress, totalDistance, overshoot)
         const centeredSlotIndex = Math.max(
           0,
           Math.round((nextOffset - ROULETTE_ITEM_WIDTH / 2) / ROULETTE_ITEM_WIDTH),

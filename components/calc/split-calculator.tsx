@@ -358,6 +358,44 @@ export function SplitCalculator() {
 
   return (
     <div className="space-y-3">
+      {/* 割り方 (合計金額の上に配置) */}
+      <div className="wm-card p-3 space-y-2">
+        <Label className="text-[11px] font-semibold tracking-wider text-[var(--wm-ink-3)]">
+          割り方
+        </Label>
+        <div className="grid grid-cols-2 gap-1.5">
+          <button
+            type="button"
+            onClick={() => setSplitMode("equal")}
+            className={`rounded-[10px] py-2 text-[12.5px] font-semibold transition ${
+              splitMode === "equal"
+                ? "bg-[var(--wm-accent)] text-white"
+                : "bg-[var(--wm-surface)] text-[var(--wm-ink-2)] hover:bg-[var(--wm-surface)]/80"
+            }`}
+            aria-pressed={splitMode === "equal"}
+          >
+            均等に割る
+          </button>
+          <button
+            type="button"
+            onClick={() => setSplitMode("weighted")}
+            className={`rounded-[10px] py-2 text-[12.5px] font-semibold transition ${
+              splitMode === "weighted"
+                ? "bg-[var(--wm-accent)] text-white"
+                : "bg-[var(--wm-surface)] text-[var(--wm-ink-2)] hover:bg-[var(--wm-surface)]/80"
+            }`}
+            aria-pressed={splitMode === "weighted"}
+          >
+            金額に差をつける
+          </button>
+        </div>
+        <p className="text-[11px] leading-relaxed text-[var(--wm-ink-3)]">
+          {splitMode === "weighted"
+            ? "「多め (×1.5)」「普通 (×1.0)」「少なめ (×0.5)」を各人に設定。よく飲む人を多めにできます。"
+            : "全員を均等に割ります。"}
+        </p>
+      </div>
+
       {/* 金額・人数入力 */}
       <div className="wm-card p-4 space-y-4">
         <div>
@@ -465,45 +503,6 @@ export function SplitCalculator() {
           </div>
         )}
       </div>
-
-      {/* 割り方 */}
-      <div className="wm-card p-3 space-y-2">
-        <Label className="text-[11px] font-semibold tracking-wider text-[var(--wm-ink-3)]">
-          割り方
-        </Label>
-        <div className="grid grid-cols-2 gap-1.5">
-          <button
-            type="button"
-            onClick={() => setSplitMode("equal")}
-            className={`rounded-[10px] py-2 text-[12.5px] font-semibold transition ${
-              splitMode === "equal"
-                ? "bg-[var(--wm-accent)] text-white"
-                : "bg-[var(--wm-surface)] text-[var(--wm-ink-2)] hover:bg-[var(--wm-surface)]/80"
-            }`}
-            aria-pressed={splitMode === "equal"}
-          >
-            均等に割る
-          </button>
-          <button
-            type="button"
-            onClick={() => setSplitMode("weighted")}
-            className={`rounded-[10px] py-2 text-[12.5px] font-semibold transition ${
-              splitMode === "weighted"
-                ? "bg-[var(--wm-accent)] text-white"
-                : "bg-[var(--wm-surface)] text-[var(--wm-ink-2)] hover:bg-[var(--wm-surface)]/80"
-            }`}
-            aria-pressed={splitMode === "weighted"}
-          >
-            金額に差をつける
-          </button>
-        </div>
-        <p className="text-[11px] leading-relaxed text-[var(--wm-ink-3)]">
-          {splitMode === "weighted"
-            ? "「多め (×1.5)」「普通 (×1.0)」「少なめ (×0.5)」を各人に設定。よく飲む人を多めにできます。"
-            : "全員を均等に割ります。"}
-        </p>
-      </div>
-
 
       {/* お楽しみ調整 */}
       <div className="rounded-[14px] border border-[var(--wm-line)] bg-card p-3">

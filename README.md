@@ -1,7 +1,6 @@
 # warimeshi
 
 [![CI](https://github.com/AfterglowLionNel/warimeshi/actions/workflows/ci.yml/badge.svg)](https://github.com/AfterglowLionNel/warimeshi/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
 飲み会や旅行の割り勘計算をシンプルにする Web アプリ。
 注文別の金額管理、グループ共有、タクシー料金の割り勘に対応。
@@ -188,4 +187,4 @@ pnpm test
 
 ## ライセンス
 
-[MIT](./LICENSE)
+All Rights Reserved. 本リポジトリのコードを許可なく利用・複製・配布することは禁止します。

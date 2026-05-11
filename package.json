@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "飲み会や旅行の割り勘計算をシンプルにする Web アプリ",
-  "license": "MIT",
+  "license": "UNLICENSED",
   "scripts": {
     "build": "next build --webpack",
     "postbuild": "node -e \"const fs=require('fs'),p='.next/prerender-manifest.json';if(fs.existsSync(p)&&!fs.readFileSync(p,'utf8').trim())fs.writeFileSync(p,JSON.stringify({version:4,routes:{},dynamicRoutes:{},notFoundRoutes:[],preview:{previewModeId:'',previewModeSigningKey:'',previewModeEncryptionKey:''}}))\"",

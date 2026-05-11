@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { ArrowRight, Check } from "lucide-react"
+import { ArrowRight, Check, Car } from "lucide-react"
 import { PreviewCard } from "@/components/landing/preview-card"
 
 export function HeroSection() {
@@ -13,7 +13,7 @@ export function HeroSection() {
           {/* badge */}
           <div className="inline-flex items-center gap-2 rounded-full bg-[var(--wm-accent-soft)] px-3 py-1.5 text-[11px] font-bold tracking-wider text-[var(--wm-accent-pressed)]">
             <span className="h-1.5 w-1.5 rounded-full bg-[var(--wm-accent)]" />
-            飲み会の幹事のための無料アプリ
+            飲み会・タクシー割り勘の無料アプリ
           </div>
 
           <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold leading-tight tracking-tight text-foreground">
@@ -25,19 +25,33 @@ export function HeroSection() {
           <p className="text-[15px] sm:text-base text-[var(--wm-ink-2)] leading-[1.7]">
             注文の記録から割り勘計算まで。
             <br className="hidden sm:block" />
-            グループでの共有もワンリンクで。
+            グループ共有もタクシー割り勘もワンタップで。
           </p>
 
           {/* CTA */}
-          <div className="flex flex-col sm:flex-row gap-2 pt-1">
-            <Button asChild size="lg" className="w-full sm:flex-1">
-              <Link href="/group">
-                グループで始める
+          <div className="space-y-2 pt-1">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button asChild size="lg" className="w-full sm:flex-1">
+                <Link href="/group">
+                  グループで始める
+                  <ArrowRight className="ml-1 h-4 w-4" />
+                </Link>
+              </Button>
+              <Button asChild variant="outline" size="lg" className="w-full sm:w-auto bg-transparent">
+                <Link href="/solo">ソロで試す</Link>
+              </Button>
+            </div>
+            <Button
+              asChild
+              variant="outline"
+              size="lg"
+              className="w-full bg-transparent border-[var(--wm-accent)]/30 text-[var(--wm-accent-pressed)] hover:bg-[var(--wm-accent-soft)] hover:text-[var(--wm-accent-pressed)]"
+            >
+              <Link href="/taxi">
+                <Car className="mr-1 h-4 w-4" />
+                タクシー割り勘で計算する
                 <ArrowRight className="ml-1 h-4 w-4" />
               </Link>
-            </Button>
-            <Button asChild variant="outline" size="lg" className="w-full sm:w-auto bg-transparent">
-              <Link href="/solo">ソロで試す</Link>
             </Button>
           </div>
 

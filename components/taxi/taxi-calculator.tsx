@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { Car, ChevronDown, Minus, Moon, Plus, Settings2, Trash2, Truck } from "lucide-react"
+import { ArrowDown, Car, ChevronDown, Info, MapPin, Minus, Moon, Plus, Settings2, Trash2, Truck } from "lucide-react"
 import { toast } from "sonner"
 
 interface TaxiCalculatorProps {
@@ -154,6 +154,8 @@ export function TaxiCalculator({
   const [sameDistance, setSameDistance] = useState("")
   const [samePersonCount, setSamePersonCount] = useState(2)
   const [segments, setSegments] = useState<Segment[]>([{ id: "1", name: "", distanceKm: 0, dropCount: 1 }])
+  const [startName, setStartName] = useState("")
+  const [showSegmentHint, setShowSegmentHint] = useState(true)
   const [, setIsSaving] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [showLongDistanceSettings, setShowLongDistanceSettings] = useState(false)
@@ -527,69 +529,125 @@ export function TaxiCalculator({
 
       {mode === "segments" && (
         <div className="wm-card p-4 space-y-3">
-          <p className="text-[12px] leading-relaxed text-[var(--wm-ink-2)]">
-            降車順に距離と降りる人数を入力。距離料金は乗車中の人数で按分されます。
-          </p>
+          {/* 使い方ヒント */}
+          {showSegmentHint && (
+            <div className="rounded-[12px] bg-[var(--wm-accent-soft)] p-3 text-[12px] leading-relaxed text-[var(--wm-accent-pressed)]">
+              <div className="flex items-start gap-2">
+                <Info className="mt-0.5 h-4 w-4 shrink-0" />
+                <div className="flex-1 space-y-1.5">
+                  <div className="font-semibold">使い方</div>
+                  <div>
+                    出発地点を入力して、降りる順に「次の停留所」と「そこまでの距離」を追加します。
+                    距離料金はその区間に乗っている人数で割られます。
+                  </div>
+                  <div className="mt-1.5 rounded-[8px] bg-white/60 p-2 text-[11px] text-[var(--wm-ink-2)]">
+                    例: 居酒屋 → <span className="font-semibold">たかしの家 (2km)</span> → <span className="font-semibold">ゆうきのアパート (3km)</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSegmentHint(false)}
+                  className="shrink-0 text-[var(--wm-accent-pressed)]/60 hover:text-[var(--wm-accent-pressed)]"
+                  aria-label="ヒントを閉じる"
+                >
+                  <Minus className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
 
-          <div className="space-y-2">
+          {/* 出発地点 */}
+          <div className="rounded-[14px] border border-dashed border-[var(--wm-line-strong)] bg-[var(--wm-surface)]/40 p-3">
+            <div className="flex items-center gap-2">
+              <span
+                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
+                style={{ background: "var(--wm-success, #10b981)", color: "#fff" }}
+              >
+                <MapPin className="h-3.5 w-3.5" />
+              </span>
+              <div className="flex-1">
+                <Label className="text-[11px] font-semibold text-[var(--wm-ink-3)]">出発地点</Label>
+                <Input
+                  placeholder="例: 居酒屋・駅前 (任意)"
+                  className="h-9 border-0 bg-transparent px-0 text-[13.5px] focus-visible:ring-0"
+                  value={startName}
+                  onChange={(e) => setStartName(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-0">
             {segments.map((seg, index) => {
               const isLast = index === segments.length - 1
+              const stopLabel = index === 0 ? "最初に降りる人・地点" : `${index + 1}番目に降りる人・地点`
+              const prevName = index === 0
+                ? (startName.trim() || "出発地")
+                : (segments[index - 1].name.trim() || `${index}番目の地点`)
+              const namePlaceholders = ["例: たかしの家", "例: ゆうきのアパート", "例: みゆきの自宅", "例: 自分の家"]
+              const namePlaceholder = namePlaceholders[index] ?? "降りる人・地点 (任意)"
               return (
-                <div
-                  key={seg.id}
-                  className="rounded-[14px] border border-[var(--wm-line)] bg-card p-3 space-y-2.5"
-                >
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
-                      style={{ background: isLast ? "var(--wm-accent)" : "var(--wm-ink-3)" }}
-                    >
-                      {index + 1}
-                    </span>
-                    <Input
-                      placeholder="降りる人・地点 (任意)"
-                      className="h-10 flex-1 text-[13.5px]"
-                      value={seg.name}
-                      onChange={(e) => updateSegment(seg.id, { name: e.target.value })}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeSegment(seg.id)}
-                      disabled={segments.length === 1}
-                      className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-[var(--wm-ink-3)] transition active:bg-[var(--wm-surface)] active:text-destructive disabled:opacity-30"
-                      aria-label="この区間を削除"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <Label className="text-[11px] text-[var(--wm-ink-3)]">この区間の距離</Label>
-                      <div className="relative mt-1">
-                        <Input
-                          type="number"
-                          step="0.1"
-                          min="0"
-                          inputMode="decimal"
-                          placeholder="0.0"
-                          className="wm-num h-11 pr-9 text-right text-[15px] font-semibold placeholder:text-[var(--wm-ink-4)] placeholder:font-normal"
-                          value={seg.distanceKm || ""}
-                          onChange={(e) =>
-                            updateSegment(seg.id, { distanceKm: e.target.value === "" ? 0 : Number.parseFloat(e.target.value) })
-                          }
-                        />
-                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[12px] text-[var(--wm-ink-3)]">km</span>
-                      </div>
+                <div key={seg.id}>
+                  {/* コネクタ: 前の地点 → この降車地までの距離 */}
+                  <div className="relative my-2 ml-3 flex items-center gap-2 pl-3 border-l-2 border-dashed border-[var(--wm-line-strong)] py-1">
+                    <ArrowDown className="h-3.5 w-3.5 shrink-0 text-[var(--wm-ink-3)]" />
+                    <Label className="text-[11px] font-medium text-[var(--wm-ink-3)] shrink-0">
+                      <span className="truncate">{prevName}</span>
+                      <span className="mx-1">→</span>
+                      <span>距離</span>
+                    </Label>
+                    <div className="relative flex-1">
+                      <Input
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        inputMode="decimal"
+                        placeholder="例: 2.5"
+                        className="wm-num h-10 pr-9 text-right text-[15px] font-semibold placeholder:text-[var(--wm-ink-4)] placeholder:font-normal"
+                        value={seg.distanceKm || ""}
+                        onChange={(e) =>
+                          updateSegment(seg.id, { distanceKm: e.target.value === "" ? 0 : Number.parseFloat(e.target.value) })
+                        }
+                      />
+                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[12px] text-[var(--wm-ink-3)]">km</span>
                     </div>
-                    <div>
-                      <Label className="text-[11px] text-[var(--wm-ink-3)]">降りる人数</Label>
-                      <div className="mt-1">
-                        <PersonStepper
-                          value={Math.max(1, seg.dropCount || 1)}
-                          onChange={(n) => updateSegment(seg.id, { dropCount: clampPersonCount(n) })}
-                          ariaLabel="この区間で降りる人数"
+                  </div>
+
+                  {/* 降車地カード */}
+                  <div className="rounded-[14px] border border-[var(--wm-line)] bg-card p-3 space-y-2.5">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
+                        style={{ background: isLast ? "var(--wm-accent)" : "var(--wm-ink-3)" }}
+                      >
+                        {index + 1}
+                      </span>
+                      <div className="flex-1">
+                        <Label className="text-[11px] font-semibold text-[var(--wm-ink-3)]">{stopLabel}</Label>
+                        <Input
+                          placeholder={namePlaceholder}
+                          className="h-9 border-0 bg-transparent px-0 text-[13.5px] focus-visible:ring-0"
+                          value={seg.name}
+                          onChange={(e) => updateSegment(seg.id, { name: e.target.value })}
                         />
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => removeSegment(seg.id)}
+                        disabled={segments.length === 1}
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-[var(--wm-ink-3)] transition active:bg-[var(--wm-surface)] active:text-destructive disabled:opacity-30"
+                        aria-label="この区間を削除"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <Label className="text-[11px] text-[var(--wm-ink-3)]">ここで降りる人数</Label>
+                      <PersonStepper
+                        value={Math.max(1, seg.dropCount || 1)}
+                        onChange={(n) => updateSegment(seg.id, { dropCount: clampPersonCount(n) })}
+                        ariaLabel="この区間で降りる人数"
+                      />
                     </div>
                   </div>
                 </div>
@@ -597,10 +655,21 @@ export function TaxiCalculator({
             })}
           </div>
 
-          <Button variant="outline" size="sm" onClick={addSegment} className="w-full bg-card h-11">
+          <Button variant="outline" size="sm" onClick={addSegment} className="w-full bg-card h-11 mt-3">
             <Plus className="mr-1 h-4 w-4" />
-            区間を追加
+            次の降車地を追加
           </Button>
+
+          {!showSegmentHint && (
+            <button
+              type="button"
+              onClick={() => setShowSegmentHint(true)}
+              className="flex w-full items-center justify-center gap-1 text-[11px] text-[var(--wm-ink-3)] hover:text-[var(--wm-ink-2)]"
+            >
+              <Info className="h-3 w-3" />
+              使い方を表示
+            </button>
+          )}
         </div>
       )}
 
@@ -664,6 +733,18 @@ export function TaxiCalculator({
                   className="absolute left-[11px] top-3 bottom-3 w-[2px]"
                   style={{ background: "var(--wm-line-strong)" }}
                 />
+                {/* 出発地点 */}
+                <div className="relative pb-3">
+                  <span
+                    className="absolute -left-[28px] top-1.5 inline-flex h-[20px] w-[20px] items-center justify-center rounded-full text-white"
+                    style={{ background: "var(--wm-success, #10b981)" }}
+                  >
+                    <MapPin className="h-3 w-3" />
+                  </span>
+                  <div className="rounded-[12px] border border-dashed border-[var(--wm-line)] bg-[var(--wm-surface)]/40 px-3 py-2 text-[12.5px] text-[var(--wm-ink-2)]">
+                    <span className="font-medium">出発: {startName || "—"}</span>
+                  </div>
+                </div>
                 {results.segments.map((seg, index) => {
                   const isExpanded = expandedSegments.has(seg.id)
                   const passenger = results.passengers[index]

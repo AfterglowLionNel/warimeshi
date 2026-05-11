@@ -20,30 +20,52 @@ interface TaxiCalculatorProps {
   currentUserId?: string
 }
 
-// 東京23区 (2022年11月改定) の普通車中型タクシーを基準にしたデフォルト値:
-//   - 初乗り 1.096km まで 500円
-//   - 加算 255m ごとに 100円 → 約 392 円/km
-//   - 迎車料金 420円 (大手各社の一般的な値)
-// 地域によって異なるため、詳細設定からユーザーが変更可能。
-const DEFAULT_TAXI_SETTINGS: FareSettings = {
-  baseKm: 1.096,
-  basePrice: 500,
-  perKmPrice: 392,
-  pickupFee: 420,
+// 地域プリセット (主要都市の実際の認可運賃を参考)
+type TaxiPresetKey = "tokyo23" | "osaka" | "nagoya"
+const TAXI_PRESETS: Record<TaxiPresetKey, { label: string; subLabel: string; settings: FareSettings }> = {
+  tokyo23: {
+    label: "東京23区",
+    subLabel: "1.096km 500円 / 255m 100円",
+    settings: { baseKm: 1.096, basePrice: 500, perKmPrice: 392, pickupFee: 420 },
+  },
+  osaka: {
+    label: "大阪市",
+    subLabel: "1.0km 600円 / 226m 100円",
+    settings: { baseKm: 1.0, basePrice: 600, perKmPrice: 442, pickupFee: 420 },
+  },
+  nagoya: {
+    label: "名古屋市",
+    subLabel: "1.013km 500円 / 233m 100円",
+    settings: { baseKm: 1.013, basePrice: 500, perKmPrice: 429, pickupFee: 420 },
+  },
 }
 
-// 運転代行は地域・会社差が大きいが、東京近郊の標準的なレンジ:
-//   - 初乗り 2km まで 2000円
-//   - 加算 300 円/km
-//   - 10km 超は +100 円/km の長距離割増を採用する会社が多い
-const DEFAULT_DAIKO_SETTINGS: FareSettings = {
-  baseKm: 2,
-  basePrice: 2000,
-  perKmPrice: 300,
-  extraFromKm: 10,
-  extraPerKm: 100,
-  pickupFee: 0,
+// 運転代行は会社差が大きいので、ボリュームゾーンに合わせた 2 プリセット
+type DaikoPresetKey = "urban" | "standard"
+const DAIKO_PRESETS: Record<DaikoPresetKey, { label: string; subLabel: string; settings: FareSettings }> = {
+  urban: {
+    label: "都市部 (東京近郊)",
+    subLabel: "2km 2000円 + 300円/km",
+    settings: { baseKm: 2, basePrice: 2000, perKmPrice: 300, extraFromKm: 10, extraPerKm: 100, pickupFee: 0 },
+  },
+  standard: {
+    label: "標準・地方",
+    subLabel: "2km 1500円 + 280円/km",
+    settings: { baseKm: 2, basePrice: 1500, perKmPrice: 280, extraFromKm: 10, extraPerKm: 100, pickupFee: 0 },
+  },
 }
+
+const DEFAULT_TAXI_SETTINGS: FareSettings = TAXI_PRESETS.tokyo23.settings
+const DEFAULT_DAIKO_SETTINGS: FareSettings = DAIKO_PRESETS.urban.settings
+
+// よく使うカスタム割増・割引 (タップでひな型追加)
+type ModifierPreset = { name: string; amount: number; type: "fixed" | "percent" }
+const MODIFIER_PRESETS: ModifierPreset[] = [
+  { name: "高速料金", amount: 1000, type: "fixed" },
+  { name: "クーポン", amount: -500, type: "fixed" },
+  { name: "繁忙期割増", amount: 10, type: "percent" },
+  { name: "幹事割引", amount: -10, type: "percent" },
+]
 
 const NIGHT_SURCHARGE_ID = "_preset_night"
 
@@ -240,12 +262,45 @@ export function TaxiCalculator({
   const addModifier = () => {
     setModifiers((prev) => [
       ...prev,
-      { id: Date.now().toString(), name: "", amount: 0, type: "fixed", direction: "add", enabled: true },
+      { id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name: "", amount: 0, type: "fixed", direction: "add", enabled: true },
+    ])
+  }
+  const addModifierFromPreset = (preset: ModifierPreset) => {
+    setModifiers((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        name: preset.name,
+        amount: Math.abs(preset.amount),
+        type: preset.type,
+        direction: preset.amount < 0 ? "subtract" : "add",
+        enabled: true,
+      },
     ])
   }
   const updateModifier = (id: string, updates: Partial<Modifier>) =>
     setModifiers((prev) => prev.map((m) => (m.id === id ? { ...m, ...updates } : m)))
   const removeModifier = (id: string) => setModifiers((prev) => prev.filter((m) => m.id !== id))
+
+  // 表示用: 符号付き金額。direction が subtract なら負数を返す。
+  const signedAmountValue = (mod: Modifier): string => {
+    if (Number.isNaN(mod.amount)) return ""
+    const signed = mod.direction === "subtract" ? -mod.amount : mod.amount
+    return String(signed)
+  }
+  const setSignedAmount = (id: string, raw: string) => {
+    if (raw === "" || raw === "-" || raw === "+") {
+      updateModifier(id, { amount: Number.NaN })
+      return
+    }
+    const v = Number.parseFloat(raw)
+    if (!Number.isFinite(v)) return
+    if (v < 0) {
+      updateModifier(id, { amount: -v, direction: "subtract" })
+    } else {
+      updateModifier(id, { amount: v, direction: "add" })
+    }
+  }
 
   const addSegment = () => setSegments((prev) => [...prev, { id: Date.now().toString(), name: "", distanceKm: 0, dropCount: 1 }])
   const updateSegment = (id: string, updates: Partial<Segment>) =>
@@ -949,6 +1004,42 @@ export function TaxiCalculator({
                 <h3 className="wm-h3 text-[14px] font-semibold">料金設定</h3>
                 <span className="wm-meta">{vehicleType === "taxi" ? "タクシー" : "運転代行"}</span>
               </div>
+
+              {/* 地域プリセット */}
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-semibold text-[var(--wm-ink-3)]">
+                  地域プリセット
+                </Label>
+                <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                  {vehicleType === "taxi"
+                    ? Object.entries(TAXI_PRESETS).map(([key, p]) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setSettings(p.settings as FareSettings)}
+                          className="rounded-[10px] border border-[var(--wm-line)] bg-card px-2.5 py-2 text-left transition hover:border-[var(--wm-accent)]/40 hover:bg-[var(--wm-surface)]/60"
+                        >
+                          <div className="text-[12px] font-bold leading-tight">{p.label}</div>
+                          <div className="wm-num mt-0.5 text-[10px] text-[var(--wm-ink-3)]">{p.subLabel}</div>
+                        </button>
+                      ))
+                    : Object.entries(DAIKO_PRESETS).map(([key, p]) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setSettings(p.settings as FareSettings)}
+                          className="rounded-[10px] border border-[var(--wm-line)] bg-card px-2.5 py-2 text-left transition hover:border-[var(--wm-accent)]/40 hover:bg-[var(--wm-surface)]/60"
+                        >
+                          <div className="text-[12px] font-bold leading-tight">{p.label}</div>
+                          <div className="wm-num mt-0.5 text-[10px] text-[var(--wm-ink-3)]">{p.subLabel}</div>
+                        </button>
+                      ))}
+                </div>
+                <p className="text-[10.5px] text-[var(--wm-ink-3)]">
+                  プリセットをタップで一括反映。下の入力欄で個別に調整できます。
+                </p>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">
@@ -984,6 +1075,11 @@ export function TaxiCalculator({
                     value={Number.isNaN(settings.perKmPrice) ? "" : settings.perKmPrice}
                     onChange={(e) => updateSetting("perKmPrice", e.target.value, Number.parseInt)}
                   />
+                  {!Number.isNaN(settings.perKmPrice) && settings.perKmPrice > 0 && (
+                    <p className="mt-1 text-[10.5px] text-[var(--wm-ink-3)]">
+                      ≒ 100円ごと <span className="wm-num font-semibold">{Math.round(100000 / settings.perKmPrice)}</span> m
+                    </p>
+                  )}
                 </div>
                 <div>
                   <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">迎車料金</Label>
@@ -1032,6 +1128,11 @@ export function TaxiCalculator({
                         value={Number.isNaN(settings.extraPerKm ?? Number.NaN) ? "" : settings.extraPerKm}
                         onChange={(e) => updateSetting("extraPerKm", e.target.value, Number.parseInt)}
                       />
+                      {settings.extraPerKm !== undefined && !Number.isNaN(settings.extraPerKm) && settings.extraPerKm > 0 && (
+                        <p className="mt-1 text-[10.5px] text-[var(--wm-ink-3)]">
+                          上乗せ単価のみで <span className="wm-num font-semibold">+{settings.extraPerKm}</span> 円/km
+                        </p>
+                      )}
                     </div>
                     <p className="col-span-2 text-[11px] text-[var(--wm-ink-3)]">
                       閾値を超えた距離分に追加単価が上乗せされます
@@ -1056,89 +1157,121 @@ export function TaxiCalculator({
             <div className="wm-card p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="wm-h3 text-[14px] font-semibold">カスタム割増・割引</h3>
-                <Button variant="outline" size="sm" onClick={addModifier} className="bg-card">
-                  <Plus className="mr-1 h-4 w-4" />
-                  追加
+                <Button variant="ghost" size="sm" onClick={addModifier} className="h-8">
+                  <Plus className="mr-1 h-3.5 w-3.5" />
+                  空欄で追加
                 </Button>
               </div>
+
+              {/* プリセットチップ */}
               <div>
-                {modifiers.length === 0 ? (
-                  <p className="text-center text-[12px] text-[var(--wm-ink-3)] py-3">深夜割増以外を追加したいときに利用</p>
-                ) : (<>
-                  <p className="mb-2 text-[11px] text-[var(--wm-ink-3)]">※ % は基本運賃 (距離料金 + 迎車料金) に対して適用 (切り捨て)</p>
-                  <div className="space-y-3">
-                    {modifiers.map((mod) => (
-                      <div
-                        key={mod.id}
-                        className="grid grid-cols-1 gap-2 p-3 bg-muted/50 rounded sm:grid-cols-[auto,1fr,120px,110px,110px,auto] sm:items-center"
+                <Label className="text-[11px] font-semibold text-[var(--wm-ink-3)]">よく使うプリセット</Label>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {MODIFIER_PRESETS.map((preset) => {
+                    const sign = preset.amount >= 0 ? "+" : ""
+                    const unit = preset.type === "percent" ? "%" : "円"
+                    return (
+                      <button
+                        key={preset.name}
+                        type="button"
+                        onClick={() => addModifierFromPreset(preset)}
+                        className="inline-flex items-center gap-1 rounded-full border border-[var(--wm-line)] bg-card px-3 py-1.5 text-[11.5px] font-semibold text-[var(--wm-ink-2)] transition hover:border-[var(--wm-accent)]/40 hover:bg-[var(--wm-accent-soft)] hover:text-[var(--wm-accent-pressed)]"
                       >
-                        <div className="flex items-center gap-2">
-                          <Switch checked={mod.enabled} onCheckedChange={(checked) => updateModifier(mod.id, { enabled: checked })} />
-                          <span className="text-xs text-muted-foreground hidden sm:inline">適用</span>
-                        </div>
-                        <Input
-                          placeholder="名称"
-                          className="h-10 sm:h-8 w-full"
-                          value={mod.name}
-                          onChange={(e) => updateModifier(mod.id, { name: e.target.value })}
-                        />
-                        <Input
-                          type="number"
-                          className="h-10 sm:h-8 w-full"
-                          value={Number.isNaN(mod.amount) ? "" : mod.amount}
-                          onChange={(e) =>
-                            updateModifier(mod.id, {
-                              amount: e.target.value === "" ? Number.NaN : Number.parseFloat(e.target.value),
-                            })
-                          }
-                        />
-                        <Select value={mod.type} onValueChange={(v) => updateModifier(mod.id, { type: v as "fixed" | "percent" })}>
-                          <SelectTrigger className="w-full sm:w-24 h-10 sm:h-8">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="fixed">円</SelectItem>
-                            <SelectItem value="percent">%</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <Select
-                          value={mod.direction}
-                          onValueChange={(v) => updateModifier(mod.id, { direction: v as "add" | "subtract" })}
+                        <span>{preset.name}</span>
+                        <span
+                          className={`wm-num text-[10.5px] font-bold ${
+                            preset.amount < 0 ? "text-blue-600" : "text-[var(--wm-accent-pressed)]"
+                          }`}
                         >
-                          <SelectTrigger className="w-full sm:w-24 h-10 sm:h-8">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="add">加算</SelectItem>
-                            <SelectItem value="subtract">減算</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-10 w-10 sm:h-8 sm:w-8 text-destructive hover:text-destructive justify-self-start"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>オプションを削除しますか？</AlertDialogTitle>
-                              <AlertDialogDescription>この操作は取り消せません。</AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>キャンセル</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => removeModifier(mod.id)}>削除する</AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
-                    ))}
-                  </div>
-                </>)}
+                          {sign}
+                          {preset.amount}
+                          {unit}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
+
+              {/* 一覧 */}
+              {modifiers.length === 0 ? (
+                <p className="text-center text-[12px] text-[var(--wm-ink-3)] py-2">
+                  上のプリセットをタップ、または「空欄で追加」から
+                </p>
+              ) : (
+                <>
+                  <p className="text-[10.5px] text-[var(--wm-ink-3)]">
+                    マイナス入力で割引、% は基本運賃 (距離料金 + 迎車料金) に適用
+                  </p>
+                  <div className="space-y-2">
+                    {modifiers.map((mod) => {
+                      const signed = signedAmountValue(mod)
+                      const isNegative = mod.direction === "subtract" && !Number.isNaN(mod.amount) && mod.amount > 0
+                      return (
+                        <div
+                          key={mod.id}
+                          className="flex flex-wrap items-center gap-2 rounded-[10px] border border-[var(--wm-line)] bg-card p-2.5"
+                        >
+                          <Switch
+                            checked={mod.enabled}
+                            onCheckedChange={(checked) => updateModifier(mod.id, { enabled: checked })}
+                            aria-label="適用"
+                          />
+                          <Input
+                            placeholder="名称"
+                            className="h-9 flex-1 min-w-[120px] text-[13.5px]"
+                            value={mod.name}
+                            onChange={(e) => updateModifier(mod.id, { name: e.target.value })}
+                          />
+                          <Input
+                            type="number"
+                            placeholder="±0"
+                            className={`wm-num h-9 w-[90px] text-right text-[14px] font-semibold ${
+                              isNegative ? "text-blue-600" : ""
+                            }`}
+                            value={signed}
+                            onChange={(e) => setSignedAmount(mod.id, e.target.value)}
+                          />
+                          <Select
+                            value={mod.type}
+                            onValueChange={(v) => updateModifier(mod.id, { type: v as "fixed" | "percent" })}
+                          >
+                            <SelectTrigger className="h-9 w-[64px]">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="fixed">円</SelectItem>
+                              <SelectItem value="percent">%</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-9 w-9 text-destructive hover:text-destructive"
+                                aria-label="削除"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>オプションを削除しますか？</AlertDialogTitle>
+                                <AlertDialogDescription>この操作は取り消せません。</AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>キャンセル</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => removeModifier(mod.id)}>削除する</AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
             </div>
           )}
 

@@ -73,6 +73,8 @@ interface TableData {
   is_archived: boolean;
   is_master: boolean;
   member_count: number;
+  order_count: number;
+  total_amount: number;
 }
 
 interface GroupPageClientProps {
@@ -702,6 +704,9 @@ function TableCard({
   const relative = formatRelativeDate(eventDate);
   const month = eventDate.getMonth() + 1;
   const day = eventDate.getDate();
+  const year = eventDate.getFullYear();
+  const currentYear = new Date().getFullYear();
+  const isOtherYear = year !== currentYear;
   const weekday = WEEKDAY_JP[eventDate.getDay()];
 
   const dateBlockStyle =
@@ -710,6 +715,8 @@ function TableCard({
       : relative.tone === "near" || relative.tone === "future"
       ? "bg-[var(--wm-accent-soft)] text-[var(--wm-accent-pressed)]"
       : "bg-[var(--wm-surface)] text-[var(--wm-ink-2)]";
+
+  const hasTotals = table.order_count > 0;
 
   return (
     <Card className="overflow-hidden border-[var(--wm-line)] transition-all hover:border-[var(--wm-accent)]/40 hover:shadow-md active:scale-[0.997]">
@@ -721,15 +728,29 @@ function TableCard({
           >
             {/* 日付ブロック */}
             <div
-              className={`flex flex-col items-center justify-center w-[68px] shrink-0 py-3 ${dateBlockStyle}`}
+              className={`flex flex-col items-center justify-center w-[72px] shrink-0 py-2.5 ${dateBlockStyle}`}
             >
-              <div className="text-[10px] font-semibold leading-none opacity-80">{month}月</div>
-              <div className="wm-num mt-0.5 text-[26px] font-bold leading-none tabular-nums">{day}</div>
-              <div className="text-[10px] font-semibold leading-none mt-1 opacity-80">({weekday})</div>
+              {isOtherYear ? (
+                <>
+                  <div className="wm-num text-[11px] font-bold leading-none tabular-nums opacity-90">
+                    {year}
+                  </div>
+                  <div className="wm-num mt-1 text-[20px] font-bold leading-none tabular-nums">
+                    {month}/{day}
+                  </div>
+                  <div className="text-[10px] font-semibold leading-none mt-1 opacity-80">({weekday})</div>
+                </>
+              ) : (
+                <>
+                  <div className="text-[10px] font-semibold leading-none opacity-80">{month}月</div>
+                  <div className="wm-num mt-0.5 text-[26px] font-bold leading-none tabular-nums">{day}</div>
+                  <div className="text-[10px] font-semibold leading-none mt-1 opacity-80">({weekday})</div>
+                </>
+              )}
             </div>
 
             {/* メイン情報 */}
-            <div className="flex-1 min-w-0 py-3 pr-2 flex flex-col justify-center">
+            <div className="flex-1 min-w-0 py-2.5 pr-2 flex flex-col justify-center">
               <div className="flex items-center gap-1.5 min-w-0">
                 {table.is_master && (
                   <span
@@ -744,7 +765,7 @@ function TableCard({
                   {table.name}
                 </h3>
               </div>
-              <div className="mt-1.5 flex items-center gap-2 text-[11.5px] text-[var(--wm-ink-3)]">
+              <div className="mt-1 flex items-center gap-2 text-[11.5px] text-[var(--wm-ink-3)]">
                 <span
                   className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold ${
                     relative.tone === "today"
@@ -766,6 +787,18 @@ function TableCard({
                 )}
               </div>
             </div>
+
+            {/* 合計金額・件数ブロック */}
+            {hasTotals && (
+              <div className="flex flex-col items-end justify-center pr-2 shrink-0">
+                <div className="wm-num text-[15px] font-bold leading-none tabular-nums text-foreground">
+                  ¥{table.total_amount.toLocaleString()}
+                </div>
+                <div className="mt-1 text-[10.5px] font-semibold text-[var(--wm-ink-3)] wm-num">
+                  {table.order_count}件
+                </div>
+              </div>
+            )}
 
             <div className="flex items-center pr-2 transition-transform group-hover:translate-x-0.5">
               <ChevronRight className="h-5 w-5 text-[var(--wm-ink-3)]" />

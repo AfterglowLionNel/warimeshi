@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { users, tables, tableMembers } from "@/lib/db/schema";
-import { eq, inArray, desc } from "drizzle-orm";
+import { users, tables, tableMembers, orders } from "@/lib/db/schema";
+import { eq, inArray, desc, isNull, and, sql } from "drizzle-orm";
 import { GroupPageClient } from "@/components/group/group-page-client";
 
 export const metadata: Metadata = {
@@ -107,6 +107,8 @@ export default async function GroupPage() {
     is_archived: boolean;
     is_master: boolean;
     member_count: number;
+    order_count: number;
+    total_amount: number;
   }> = [];
 
   if (tableIds.length > 0) {
@@ -128,9 +130,21 @@ export default async function GroupPage() {
         })
       );
 
+      // Aggregate order count and total amount per table (excluding soft-deleted)
+      const orderSummaries = await db
+        .select({
+          tableId: orders.tableId,
+          count: sql<number>`count(*)::int`,
+          total: sql<number>`coalesce(sum(${orders.lineTotal}), 0)::int`,
+        })
+        .from(orders)
+        .where(and(inArray(orders.tableId, tableIds), isNull(orders.deletedAt)))
+        .groupBy(orders.tableId);
+
       tablesWithDetails = tablesData.map((table) => {
         const membership = memberships.find((m) => m.tableId === table.id);
         const countData = memberCounts.find((c) => c.tableId === table.id);
+        const summary = orderSummaries.find((s) => s.tableId === table.id);
         return {
           id: table.id,
           name: table.name,
@@ -139,6 +153,8 @@ export default async function GroupPage() {
           is_archived: table.isArchived,
           is_master: membership?.isMaster || false,
           member_count: countData?.count || 0,
+          order_count: Number(summary?.count ?? 0),
+          total_amount: Number(summary?.total ?? 0),
         };
       });
     }

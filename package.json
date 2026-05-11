@@ -1,7 +1,9 @@
 {
-  "name": "my-v0-project",
+  "name": "warimeshi",
   "version": "0.1.0",
   "private": true,
+  "description": "飲み会や旅行の割り勘計算をシンプルにする Web アプリ",
+  "license": "MIT",
   "scripts": {
     "build": "next build --webpack",
     "postbuild": "node -e \"const fs=require('fs'),p='.next/prerender-manifest.json';if(fs.existsSync(p)&&!fs.readFileSync(p,'utf8').trim())fs.writeFileSync(p,JSON.stringify({version:4,routes:{},dynamicRoutes:{},notFoundRoutes:[],preview:{previewModeId:'',previewModeSigningKey:'',previewModeEncryptionKey:''}}))\"",
@@ -9,6 +11,10 @@
     "dev": "next dev",
     "lint": "eslint .",
     "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
@@ -86,6 +92,7 @@
     "@types/node": "^22.19.5",
     "@types/react": "^19.2.8",
     "@types/react-dom": "^19.2.3",
+    "@vitest/coverage-v8": "^4.1.6",
     "baseline-browser-mapping": "^2.9.19",
     "drizzle-kit": "^0.31.8",
     "eslint": "^9.39.2",
@@ -94,7 +101,8 @@
     "tailwindcss": "^4.1.18",
     "tw-animate-css": "1.3.3",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.54.0"
+    "typescript-eslint": "^8.54.0",
+    "vitest": "^4.1.6"
   },
   "pnpm": {
     "overrides": {
@@ -105,7 +113,6 @@
       "minimatch": ">=10.2.5",
       "brace-expansion": ">=2.0.3",
       "flatted": ">=3.4.2",
-      "ajv": ">=8.20.0",
       "esbuild": ">=0.28.0"
     }
   }

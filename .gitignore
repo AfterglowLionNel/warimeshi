@@ -7,7 +7,6 @@ coverage/
 
 .env
 .env.*
-!.env.example
 
 .DS_Store
 .vscode/
@@ -16,6 +15,10 @@ ecosystem.local.config.js
 
 tsconfig.tsbuildinfo
 package-lock.json
+
+# ローカル専用ドキュメント
+CLAUDE.md
+SITE_OVERVIEW.md
 
 # 機密 / ローカル成果物 (本番 DB dump, セッション cookie, 解凍したデザインバンドル)
 *.dump

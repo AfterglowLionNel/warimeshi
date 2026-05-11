@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users, tables, tableMembers } from "@/lib/db/schema";
 import { eq, inArray, desc } from "drizzle-orm";
-import { generateInviteToken } from "@/lib/utils/format";
+import { generateInviteToken } from "@/lib/utils/invite-token";
 import { resolveUserIdFromGuestToken } from "@/lib/auth/permissions";
 import { encryptInvitePassword } from "@/lib/crypto/invite-password";
 import { z } from "zod";

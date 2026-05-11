@@ -11,7 +11,14 @@ export default function LoginPage() {
   const [loading, setLoading] = useState<string | null>(null)
   const searchParams = useSearchParams()
   const redirectParam = searchParams.get("redirect")
-  const callbackUrl = redirectParam && redirectParam.startsWith("/") ? redirectParam : "/group"
+  // "//evil.com/..." 形式のプロトコル相対 URL を弾く (Open Redirect 防止)
+  const callbackUrl =
+    redirectParam &&
+    redirectParam.startsWith("/") &&
+    !redirectParam.startsWith("//") &&
+    !redirectParam.startsWith("/\\")
+      ? redirectParam
+      : "/group"
 
   useEffect(() => {
     fetch("/api/auth/csrf")

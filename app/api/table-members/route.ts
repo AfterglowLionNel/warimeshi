@@ -235,6 +235,8 @@ export async function GET(request: Request) {
   }
 
   try {
+    // user オブジェクトは表示用の最低限の項目のみ返す。
+    // email / isAdmin / createdAt / updatedAt は他のメンバーへの第三者提供にあたるため返さない。
     const members = await db
       .select({
         id: tableMembers.id,
@@ -247,11 +249,7 @@ export async function GET(request: Request) {
         joinedAt: tableMembers.joinedAt,
         user: {
           id: users.id,
-          email: users.email,
           nickname: users.nickname,
-          isAdmin: users.isAdmin,
-          createdAt: users.createdAt,
-          updatedAt: users.updatedAt,
         },
       })
       .from(tableMembers)

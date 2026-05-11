@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+
+const patchSchema = z.object({
+  nickname: z.string().trim().max(50),
+});
 
 export async function PATCH(request: Request) {
   const session = await auth();
@@ -12,18 +17,20 @@ export async function PATCH(request: Request) {
   }
 
   const body = await request.json().catch(() => null);
-  const nickname = body?.nickname as string | undefined;
+  const parsed = patchSchema.safeParse(body);
 
-  if (nickname === undefined) {
+  if (!parsed.success) {
     return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
   }
+
+  const nickname = parsed.data.nickname;
 
   try {
     // Try to update by session ID first
     const result = await db
       .update(users)
       .set({
-        nickname: nickname.trim() || null,
+        nickname: nickname || null,
         updatedAt: new Date(),
       })
       .where(eq(users.id, session.user.id))
@@ -34,7 +41,7 @@ export async function PATCH(request: Request) {
       await db
         .update(users)
         .set({
-          nickname: nickname.trim() || null,
+          nickname: nickname || null,
           updatedAt: new Date(),
         })
         .where(eq(users.email, session.user.email));

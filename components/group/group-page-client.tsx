@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import type { User } from "@/lib/types/group";
+import type { UserSummary } from "@/lib/types/group";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -77,12 +77,12 @@ interface TableData {
 }
 
 interface GroupPageClientProps {
-  serverUser: User | null;
+  serverUser: UserSummary | null;
   serverTables: TableData[];
 }
 
 export function GroupPageClient({ serverUser, serverTables }: GroupPageClientProps) {
-  const [user, setUser] = useState<User | null>(serverUser);
+  const [user, setUser] = useState<UserSummary | null>(serverUser);
   const [tables, setTables] = useState<TableData[]>(serverTables);
   const [isLoading, setIsLoading] = useState(!serverUser);
   const [isGuest, setIsGuest] = useState(false);
@@ -108,12 +108,8 @@ export function GroupPageClient({ serverUser, serverTables }: GroupPageClientPro
 
       setUser({
         id: guestData.userId,
-        firebase_uid: guestData.userId,
         email: null,
         nickname: guestData.nickname || "ゲスト",
-        is_admin: false,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
       });
       setIsGuest(true);
 

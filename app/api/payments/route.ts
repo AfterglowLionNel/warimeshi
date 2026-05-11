@@ -203,6 +203,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Not a member" }, { status: 403 })
   }
 
+  // アーカイブ済テーブルの会計を事後改ざんできないようにブロックする
+  const [tableState] = await db
+    .select({ isArchived: tables.isArchived })
+    .from(tables)
+    .where(eq(tables.id, tableId))
+    .limit(1)
+
+  if (tableState?.isArchived) {
+    return NextResponse.json({ error: "アーカイブ済みのテーブルは編集できません" }, { status: 403 })
+  }
+
   // Get all members
   const members = await db
     .select({ id: tableMembers.id, displayName: tableMembers.displayName })

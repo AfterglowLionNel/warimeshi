@@ -4,7 +4,6 @@ import type React from "react";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { generateInviteToken } from "@/lib/utils/format";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -105,10 +104,9 @@ export default function CreateTablePage() {
       }
 
       const { inviteToken } = (await res.json()) as { inviteToken: string };
-      const fallbackToken = inviteToken || generateInviteToken();
 
       toast.success("テーブルを作成しました");
-      router.push(`/group/table/${fallbackToken}`);
+      router.push(`/group/table/${inviteToken}`);
     } catch (error) {
       console.error("Error creating table:", error);
       toast.error("テーブルの作成に失敗しました");

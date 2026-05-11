@@ -144,15 +144,12 @@ export default async function GroupPage() {
     }
   }
 
-  // Convert dbUser to expected format
+  // Client Component に渡す最小限の DTO。
+  // is_admin / created_at / updated_at は UI で使わず、漏らす理由がないため含めない。
   const userForComponent = {
     id: dbUser.id,
-    firebase_uid: dbUser.id,
     email: dbUser.email,
     nickname: dbUser.nickname,
-    is_admin: dbUser.isAdmin,
-    created_at: dbUser.createdAt.toISOString(),
-    updated_at: dbUser.updatedAt.toISOString(),
   };
 
   return <GroupPageClient serverUser={userForComponent} serverTables={tablesWithDetails} />;

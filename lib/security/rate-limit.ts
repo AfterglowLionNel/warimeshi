@@ -1,3 +1,5 @@
+import "server-only";
+
 // シンプルな in-memory sliding window レート制限。
 // 単一プロセス前提 (Next.js dev / pm2 単一インスタンス)。
 // 複数インスタンス本番では Redis などに置き換えること。

@@ -1,3 +1,5 @@
+import "server-only"
+
 import { EventEmitter } from "events"
 
 export type TableEventType = "order:created" | "order:updated" | "order:deleted" | "member:joined" | "member:left" | "payment:updated"

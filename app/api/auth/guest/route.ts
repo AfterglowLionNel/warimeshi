@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -7,6 +8,10 @@ import { clientKey, rateLimit, rateLimitHeaders } from "@/lib/security/rate-limi
 
 const GUEST_TOKEN_EXPIRY_DAYS = 30;
 const GUEST_COOKIE_NAME = "wm_guest_token";
+
+const postSchema = z.object({
+  displayName: z.string().trim().max(50).optional(),
+});
 
 export async function POST(request: Request) {
   // ゲスト作成は IP あたり 1 時間 5 回まで (大量生成 / DoS 防止)
@@ -19,11 +24,17 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json().catch(() => null);
-  const displayName = body?.displayName as string | undefined;
+  const parsed = postSchema.safeParse(body ?? {});
+
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+  }
+
+  const displayName = parsed.data.displayName;
 
   const guestToken = crypto.randomUUID();
   const guestTokenExpiresAt = new Date(Date.now() + GUEST_TOKEN_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
-  const nickname = displayName?.trim() || "ゲスト";
+  const nickname = displayName || "ゲスト";
 
   try {
     const [newUser] = await db

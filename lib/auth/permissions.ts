@@ -1,3 +1,5 @@
+import "server-only";
+
 import { db } from "@/lib/db";
 import { users, tables, tableMembers, orders } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";

@@ -8,6 +8,14 @@ export interface User {
   updated_at: string
 }
 
+// Client Component に渡す最小限のユーザ情報。
+// is_admin / created_at / updated_at など UI で不要な属性は含めない。
+export interface UserSummary {
+  id: string
+  email: string | null
+  nickname: string | null
+}
+
 export interface Table {
   id: string
   owner_user_id: string | null

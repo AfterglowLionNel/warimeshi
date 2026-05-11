@@ -3,8 +3,8 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users, tables } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { resolveUserIdFromGuestToken } from "@/lib/auth/permissions";
-import { generateInviteToken } from "@/lib/utils/format";
+import { resolveUserIdFromGuestToken, isUserTableMember } from "@/lib/auth/permissions";
+import { generateInviteToken } from "@/lib/utils/invite-token";
 
 async function resolveUserId(request: Request): Promise<string | null> {
   const session = await auth();
@@ -200,12 +200,18 @@ export async function GET(
       return NextResponse.json({ error: "Table not found" }, { status: 404 });
     }
 
+    // invite_token はメンバー (またはオーナー) のみに返す。
+    // 招待URLは「URL を持っている人は参加できる」設計だが、
+    // tableId しか知らない第三者に渡すべき情報ではない。
+    const isOwner = table.ownerUserId === userId;
+    const isMember = isOwner ? true : await isUserTableMember(userId, tableId);
+
     return NextResponse.json({
       id: table.id,
       owner_user_id: table.ownerUserId,
       name: table.name,
       event_date: table.eventDate.toISOString().split("T")[0],
-      invite_token: table.inviteToken,
+      invite_token: isMember ? table.inviteToken : null,
       is_archived: table.isArchived,
       archived_at: table.archivedAt?.toISOString() ?? null,
       is_locked: table.isLocked,

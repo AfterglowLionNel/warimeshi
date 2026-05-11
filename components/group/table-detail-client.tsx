@@ -41,6 +41,7 @@ import {
   Check,
   Copy,
   Crown,
+  List,
   Lock,
   LockOpen,
   Pencil,
@@ -1175,15 +1176,26 @@ export function TableDetailClient({
 
         {/* 最近の注文フィード */}
         <section>
-          <div className="mb-2.5 flex items-center justify-between">
-            <h2 className="wm-h3 text-[14px] font-semibold">最近の注文</h2>
+          <div className="mb-2.5 flex items-center justify-between gap-2">
+            <h2 className="wm-h3 text-[14px] font-semibold">
+              最近の注文
+              {orders.length > 5 && (
+                <span className="ml-1.5 text-[11px] font-normal text-[var(--wm-ink-3)]">
+                  (新しい5件)
+                </span>
+              )}
+            </h2>
             {orders.length > 0 && (
               <button
                 type="button"
                 onClick={() => setShowAllOrders(true)}
-                className="text-[12px] text-[var(--wm-ink-3)] hover:text-foreground"
+                className="inline-flex items-center gap-1 rounded-full border border-[var(--wm-line)] bg-card px-2.5 py-1 text-[11.5px] font-semibold text-[var(--wm-ink-2)] shadow-sm transition-colors hover:border-[var(--wm-accent)]/40 hover:text-foreground active:bg-[var(--wm-surface)]"
               >
-                すべて見る ›
+                <List className="h-3 w-3" />
+                <span>すべて見る</span>
+                <span className="wm-num text-[10.5px] font-bold text-[var(--wm-accent-pressed)]">
+                  {orders.length}件
+                </span>
               </button>
             )}
           </div>
@@ -1246,6 +1258,17 @@ export function TableDetailClient({
                     </div>
                   )
                 })}
+              {orders.length > 5 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllOrders(true)}
+                  className="flex w-full items-center justify-center gap-1.5 border-t border-[var(--wm-line)] bg-[var(--wm-surface)]/40 px-3 py-2.5 text-[12.5px] font-semibold text-[var(--wm-accent-pressed)] transition-colors hover:bg-[var(--wm-surface)] active:bg-[var(--wm-surface)]/80"
+                >
+                  <List className="h-3.5 w-3.5" />
+                  残り{orders.length - 5}件をまとめて見る
+                  <span className="text-[var(--wm-ink-3)]">›</span>
+                </button>
+              )}
             </div>
           )}
         </section>

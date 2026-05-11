@@ -2,9 +2,17 @@
 
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { User, Users, Car, ChevronRight, ArrowRight } from "lucide-react"
+import { Calculator, User, Users, Car, ChevronRight, ArrowRight } from "lucide-react"
 
 const features = [
+  {
+    icon: Calculator,
+    title: "かんたん計算",
+    desc: "金額と人数だけ。1人あたりを即計算。",
+    href: "/calc",
+    accent: false,
+    tag: "最速",
+  },
   {
     icon: User,
     title: "ソロモード",
@@ -35,7 +43,7 @@ export function FeaturesSection() {
       <div className="container mx-auto px-5">
         <div className="max-w-md mx-auto md:max-w-2xl">
           <div className="mb-3 text-[11px] font-bold tracking-[.12em] text-[var(--wm-ink-3)]">
-            3つのモード
+            4つのモード
           </div>
 
           <div className="space-y-2.5">

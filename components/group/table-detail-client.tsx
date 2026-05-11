@@ -776,13 +776,14 @@ export function TableDetailClient({
     return result
   }, [processedOrders])
 
-  const totalPages = Math.ceil(displayOrders.length / ITEMS_PER_PAGE)
-  const paginatedDisplayOrders = displayOrders.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE)
+  const totalPages = Math.max(1, Math.ceil(displayOrders.length / ITEMS_PER_PAGE))
+  const paginatedDisplayOrders = displayOrders.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE,
+  )
 
   useEffect(() => {
-    if (totalPages > 0 && currentPage > totalPages) {
-      setCurrentPage(totalPages)
-    }
+    if (currentPage > totalPages) setCurrentPage(totalPages)
   }, [currentPage, totalPages])
 
   const canManageOrder = (order: Order & { member?: TableMember }) =>
@@ -1302,7 +1303,7 @@ export function TableDetailClient({
             }
           }}
         >
-          <DialogContent className="flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-4xl flex-col overflow-hidden p-0 sm:max-h-[calc(100dvh-3rem)] sm:w-full">
+          <DialogContent className="flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-4xl flex-col overflow-hidden p-0 sm:h-[calc(100dvh-3rem)] sm:max-h-[calc(100dvh-3rem)] sm:w-full">
             <DialogHeader className="border-b px-4 py-4 pr-12 text-left sm:px-6 sm:pr-14">
               <DialogTitle>注文一覧</DialogTitle>
               <DialogDescription>
@@ -1830,27 +1831,39 @@ export function TableDetailClient({
                   </UITable>
                 </div>
 
-                {totalPages > 1 && (
-                  <div className="flex items-center justify-center gap-2 mt-4">
-                    <Button variant="outline" size="sm" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)}>
-                      前へ
-                    </Button>
-                    <span className="text-sm text-muted-foreground">
-                      {currentPage} / {totalPages}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={currentPage === totalPages}
-                      onClick={() => setCurrentPage((p) => p + 1)}
-                    >
-                      次へ
-                    </Button>
-                  </div>
-                )}
               </>
             )}
             </div>
+
+            {/* ページネーション (DialogContent 直下 = 常に下端に固定で見える) */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between gap-2 border-t border-[var(--wm-line)] bg-card px-4 py-3 sm:px-6">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className="min-w-[72px]"
+                >
+                  ← 前へ
+                </Button>
+                <span className="wm-num text-[13px] font-semibold text-[var(--wm-ink-2)]">
+                  {currentPage} / {totalPages}
+                  <span className="ml-1.5 text-[11px] font-normal text-[var(--wm-ink-3)]">
+                    ({displayOrders.length}件)
+                  </span>
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  className="min-w-[72px]"
+                >
+                  次へ →
+                </Button>
+              </div>
+            )}
           </DialogContent>
         </Dialog>
 

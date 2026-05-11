@@ -18,7 +18,7 @@ export type RouletteMemberLike = {
 }
 
 const ROULETTE_ITEM_WIDTH = 128
-const ROULETTE_DURATION_MS = 8200
+const ROULETTE_DURATION_MS = 5200
 const ROULETTE_LOOP_COUNT = 64
 // オーバーシュート (1個分行き過ぎてバウンスバック) 演出を起こす確率
 const ROULETTE_OVERSHOOT_CHANCE = 0.22

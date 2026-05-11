@@ -58,14 +58,14 @@ export function FaqSection({
               key={item.question}
               className="group rounded-[12px] border border-[var(--wm-line)] bg-card transition-colors [&[open]]:bg-[var(--wm-surface)]/30"
             >
-              <summary className="flex cursor-pointer list-none items-start justify-between gap-3 px-4 py-3 text-left text-[13.5px] font-medium text-foreground transition-colors hover:bg-[var(--wm-surface)]/40 [&::-webkit-details-marker]:hidden">
-                <span className="flex-1">{item.question}</span>
+              <summary className="flex cursor-pointer list-none items-start justify-between gap-3 px-3.5 py-2.5 text-left text-[12.5px] font-semibold text-foreground transition-colors hover:bg-[var(--wm-surface)]/40 [&::-webkit-details-marker]:hidden">
+                <span className="flex-1 leading-snug">{item.question}</span>
                 <span
                   aria-hidden="true"
-                  className="mt-1 inline-block h-2 w-2 shrink-0 border-r-2 border-b-2 border-[var(--wm-ink-3)] transition-transform group-open:rotate-45 -rotate-45"
+                  className="mt-1 inline-block h-1.5 w-1.5 shrink-0 border-r-[1.5px] border-b-[1.5px] border-[var(--wm-ink-3)] transition-transform group-open:rotate-45 -rotate-45"
                 />
               </summary>
-              <div className="px-4 pb-4 pt-0 text-[13px] leading-[1.75] text-[var(--wm-ink-2)]">
+              <div className="space-y-2 px-3.5 pb-3.5 pt-0 text-[11.5px] leading-[1.75] text-[var(--wm-ink-2)] [&_strong]:font-semibold [&_strong]:text-foreground">
                 {item.answerNode ?? item.answer}
               </div>
             </details>

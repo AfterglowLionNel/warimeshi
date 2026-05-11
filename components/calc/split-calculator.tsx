@@ -16,8 +16,6 @@ const PERSON_MIN = 1
 const PERSON_MAX = 30
 const AMOUNT_MAX = 99_999_999
 
-type RoundMode = "none" | "ceil100" | "ceil500" | "ceil1000"
-
 type SplitMode = "equal" | "weighted"
 type WeightTier = "less" | "normal" | "more"
 
@@ -45,13 +43,6 @@ const MEMBER_COLORS = [
   "#D4F0E1",
   "#FFE0B5",
 ] as const
-
-const ROUND_OPTIONS: { value: RoundMode; label: string; description: string }[] = [
-  { value: "none", label: "1円", description: "そのまま (1円きざみ・端数あり)" },
-  { value: "ceil100", label: "100円", description: "1人あたりを100円きざみに切り上げ (集金しやすい)" },
-  { value: "ceil500", label: "500円", description: "1人あたりを500円きざみに切り上げ" },
-  { value: "ceil1000", label: "1000円", description: "1人あたりを1000円きざみに切り上げ" },
-]
 
 function clampPersonCount(n: number) {
   if (!Number.isFinite(n)) return PERSON_MIN
@@ -117,7 +108,6 @@ export function SplitCalculator() {
   const [amount, setAmount] = useState("")
   const [persons, setPersons] = useState<Person[]>(() => [makePerson(), makePerson()])
   const [showNamesEditor, setShowNamesEditor] = useState(false)
-  const [roundMode, setRoundMode] = useState<RoundMode>("none")
   const [splitMode, setSplitMode] = useState<SplitMode>("equal")
   const [weights, setWeights] = useState<Record<string, WeightTier>>({})
   const [funAdjustment, setFunAdjustment] = useState<FunAdjustment>({ type: "none" })
@@ -220,9 +210,6 @@ export function SplitCalculator() {
     const amounts: Record<string, number> = {}
     memberIds.forEach((id) => (amounts[id] = 0))
 
-    const roundStep =
-      roundMode === "ceil100" ? 100 : roundMode === "ceil500" ? 500 : roundMode === "ceil1000" ? 1000 : 0
-
     // 1) 初期割り当て
     if (splitMode === "weighted") {
       // 多め=1.5 / 普通=1.0 / 少なめ=0.5 の比率で配分
@@ -232,7 +219,6 @@ export function SplitCalculator() {
         // 全員少なめ&0 等の異常系: 均等にフォールバック
         distributeAmount(amounts, memberIds, total)
       } else {
-        // 加重生額
         const raw = memberIds.map((id, i) => ({
           id,
           index: i,
@@ -244,7 +230,7 @@ export function SplitCalculator() {
           amounts[r.id] = v
           assigned += v
         }
-        // 端数を小数部の大きい順に +1 円ずつ配る (固定の order)
+        // 端数を小数部の大きい順に +1 円ずつ配る
         let remainder = total - assigned
         const order = [...raw].sort((a, b) => {
           const fa = a.rawAmount - Math.floor(a.rawAmount)
@@ -256,17 +242,7 @@ export function SplitCalculator() {
           amounts[r.id] += 1
           remainder -= 1
         }
-        // roundMode が設定されていれば各人の額を切り上げ (1人あたり一律ではなく個別)
-        if (roundStep > 0) {
-          memberIds.forEach((id) => {
-            const v = amounts[id]
-            amounts[id] = Math.ceil(v / roundStep) * roundStep
-          })
-        }
       }
-    } else if (roundStep > 0) {
-      const perRound = Math.ceil(total / memberIds.length / roundStep) * roundStep
-      memberIds.forEach((id) => (amounts[id] = perRound))
     } else {
       distributeAmount(amounts, memberIds, total)
     }
@@ -301,7 +277,7 @@ export function SplitCalculator() {
 
     const collected = memberIds.reduce((sum, id) => sum + (amounts[id] || 0), 0)
     return { amounts, collected }
-  }, [validTotal, total, persons, roundMode, funAdjustment, splitMode, weights])
+  }, [validTotal, total, persons, funAdjustment, splitMode, weights])
 
   const breakdown = useMemo(() => {
     if (!result) return null
@@ -528,35 +504,6 @@ export function SplitCalculator() {
         </p>
       </div>
 
-      {/* 集金単位 (1円・100円・500円・1000円きざみ) */}
-      <div className="wm-card p-3 space-y-2">
-        <Label className="text-[11px] font-semibold tracking-wider text-[var(--wm-ink-3)]">
-          1人あたりの金額の丸め (集金単位)
-        </Label>
-        <div className="grid grid-cols-4 gap-1.5">
-          {ROUND_OPTIONS.map((opt) => {
-            const active = roundMode === opt.value
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => setRoundMode(opt.value)}
-                className={`rounded-[10px] py-2 text-[12px] font-semibold transition ${
-                  active
-                    ? "bg-[var(--wm-accent)] text-white"
-                    : "bg-[var(--wm-surface)] text-[var(--wm-ink-2)] hover:bg-[var(--wm-surface)]/80"
-                }`}
-                aria-pressed={active}
-              >
-                {opt.label}
-              </button>
-            )
-          })}
-        </div>
-        <p className="text-[11px] leading-relaxed text-[var(--wm-ink-3)]">
-          {ROUND_OPTIONS.find((o) => o.value === roundMode)?.description}
-        </p>
-      </div>
 
       {/* お楽しみ調整 */}
       <div className="rounded-[14px] border border-[var(--wm-line)] bg-card p-3">
@@ -730,7 +677,7 @@ export function SplitCalculator() {
                   <div className="text-[11px] font-semibold tracking-[.1em] opacity-60">1人あたり</div>
                   <div className="wm-num mt-1 text-[36px] font-bold leading-none tracking-tight">
                     ¥{(breakdown[0]?.amount ?? 0).toLocaleString()}
-                    {roundMode === "none" && (breakdown[0]?.amount ?? 0) !== (breakdown[breakdown.length - 1]?.amount ?? 0) && (
+                    {(breakdown[0]?.amount ?? 0) !== (breakdown[breakdown.length - 1]?.amount ?? 0) && (
                       <span className="ml-2 text-[14px] font-semibold opacity-70">
                         〜¥{(breakdown[breakdown.length - 1]?.amount ?? 0).toLocaleString()}
                       </span>
@@ -810,12 +757,6 @@ export function SplitCalculator() {
                   </span>
                 </div>
               ))}
-              {roundMode !== "none" && result.collected > total && (
-                <div className="mt-2 flex items-center justify-between rounded-[10px] bg-[var(--wm-accent-soft)] px-3 py-2 text-[12px] text-[var(--wm-accent-pressed)]">
-                  <span>幹事に残る (おつり)</span>
-                  <span className="wm-num font-bold">+¥{(result.collected - total).toLocaleString()}</span>
-                </div>
-              )}
             </div>
           )}
         </>

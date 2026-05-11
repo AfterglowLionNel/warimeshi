@@ -18,6 +18,15 @@ const AMOUNT_MAX = 99_999_999
 
 type RoundMode = "none" | "ceil100" | "ceil500" | "ceil1000"
 
+type SplitMode = "equal" | "weighted"
+type WeightTier = "less" | "normal" | "more"
+
+const WEIGHT_MULTIPLIERS: Record<WeightTier, number> = {
+  less: 0.5,
+  normal: 1.0,
+  more: 1.5,
+}
+
 type FunAdjustment =
   | { type: "none" }
   | { type: "remainder_roulette"; targetId: string }
@@ -38,10 +47,10 @@ const MEMBER_COLORS = [
 ] as const
 
 const ROUND_OPTIONS: { value: RoundMode; label: string; description: string }[] = [
-  { value: "none", label: "1円単位", description: "そのまま (端数あり)" },
-  { value: "ceil100", label: "100円", description: "1人あたり100円単位で切り上げ" },
-  { value: "ceil500", label: "500円", description: "1人あたり500円単位で切り上げ" },
-  { value: "ceil1000", label: "1000円", description: "1人あたり1000円単位で切り上げ" },
+  { value: "none", label: "1円", description: "そのまま (1円きざみ・端数あり)" },
+  { value: "ceil100", label: "100円", description: "1人あたりを100円きざみに切り上げ (集金しやすい)" },
+  { value: "ceil500", label: "500円", description: "1人あたりを500円きざみに切り上げ" },
+  { value: "ceil1000", label: "1000円", description: "1人あたりを1000円きざみに切り上げ" },
 ]
 
 function clampPersonCount(n: number) {
@@ -109,6 +118,8 @@ export function SplitCalculator() {
   const [persons, setPersons] = useState<Person[]>(() => [makePerson(), makePerson()])
   const [showNamesEditor, setShowNamesEditor] = useState(false)
   const [roundMode, setRoundMode] = useState<RoundMode>("none")
+  const [splitMode, setSplitMode] = useState<SplitMode>("equal")
+  const [weights, setWeights] = useState<Record<string, WeightTier>>({})
   const [funAdjustment, setFunAdjustment] = useState<FunAdjustment>({ type: "none" })
   const [showFun, setShowFun] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -139,6 +150,25 @@ export function SplitCalculator() {
       setFunAdjustment({ type: "none" })
     }
   }, [persons, funAdjustment])
+
+  // 削除された人の weights もクリーンアップ
+  useEffect(() => {
+    setWeights((prev) => {
+      const ids = new Set(persons.map((p) => p.id))
+      let changed = false
+      const next: Record<string, WeightTier> = {}
+      for (const [id, w] of Object.entries(prev)) {
+        if (ids.has(id)) next[id] = w
+        else changed = true
+      }
+      return changed ? next : prev
+    })
+  }, [persons])
+
+  // 「金額に差をつける」が ON のときは名前編集を自動展開 (操作対象が見えるように)
+  useEffect(() => {
+    if (splitMode === "weighted") setShowNamesEditor(true)
+  }, [splitMode])
 
   const memberColorMap = useMemo(() => {
     const map: Record<string, string> = {}
@@ -190,13 +220,55 @@ export function SplitCalculator() {
     const amounts: Record<string, number> = {}
     memberIds.forEach((id) => (amounts[id] = 0))
 
-    // 1) 初期割り当て (roundMode に応じて)
-    if (roundMode === "none") {
-      distributeAmount(amounts, memberIds, total)
-    } else {
-      const step = roundMode === "ceil100" ? 100 : roundMode === "ceil500" ? 500 : 1000
-      const perRound = Math.ceil(total / memberIds.length / step) * step
+    const roundStep =
+      roundMode === "ceil100" ? 100 : roundMode === "ceil500" ? 500 : roundMode === "ceil1000" ? 1000 : 0
+
+    // 1) 初期割り当て
+    if (splitMode === "weighted") {
+      // 多め=1.5 / 普通=1.0 / 少なめ=0.5 の比率で配分
+      const tiers = memberIds.map((id) => weights[id] || "normal")
+      const totalWeight = tiers.reduce((sum, t) => sum + WEIGHT_MULTIPLIERS[t], 0)
+      if (totalWeight <= 0) {
+        // 全員少なめ&0 等の異常系: 均等にフォールバック
+        distributeAmount(amounts, memberIds, total)
+      } else {
+        // 加重生額
+        const raw = memberIds.map((id, i) => ({
+          id,
+          index: i,
+          rawAmount: (total * WEIGHT_MULTIPLIERS[tiers[i]]) / totalWeight,
+        }))
+        let assigned = 0
+        for (const r of raw) {
+          const v = Math.floor(r.rawAmount)
+          amounts[r.id] = v
+          assigned += v
+        }
+        // 端数を小数部の大きい順に +1 円ずつ配る (固定の order)
+        let remainder = total - assigned
+        const order = [...raw].sort((a, b) => {
+          const fa = a.rawAmount - Math.floor(a.rawAmount)
+          const fb = b.rawAmount - Math.floor(b.rawAmount)
+          return fb - fa || a.index - b.index
+        })
+        for (const r of order) {
+          if (remainder <= 0) break
+          amounts[r.id] += 1
+          remainder -= 1
+        }
+        // roundMode が設定されていれば各人の額を切り上げ (1人あたり一律ではなく個別)
+        if (roundStep > 0) {
+          memberIds.forEach((id) => {
+            const v = amounts[id]
+            amounts[id] = Math.ceil(v / roundStep) * roundStep
+          })
+        }
+      }
+    } else if (roundStep > 0) {
+      const perRound = Math.ceil(total / memberIds.length / roundStep) * roundStep
       memberIds.forEach((id) => (amounts[id] = perRound))
+    } else {
+      distributeAmount(amounts, memberIds, total)
     }
 
     // 2) お楽しみ調整
@@ -229,7 +301,7 @@ export function SplitCalculator() {
 
     const collected = memberIds.reduce((sum, id) => sum + (amounts[id] || 0), 0)
     return { amounts, collected }
-  }, [validTotal, total, persons, roundMode, funAdjustment])
+  }, [validTotal, total, persons, roundMode, funAdjustment, splitMode, weights])
 
   const breakdown = useMemo(() => {
     if (!result) return null
@@ -305,7 +377,8 @@ export function SplitCalculator() {
 
   const hasCustomNames = persons.some((p) => p.name.trim() !== "")
   const hasAdjustment = funAdjustment.type !== "none"
-  const showBreakdown = hasCustomNames || hasAdjustment
+  const isWeighted = splitMode === "weighted"
+  const showBreakdown = hasCustomNames || hasAdjustment || isWeighted
 
   return (
     <div className="space-y-3">
@@ -352,37 +425,115 @@ export function SplitCalculator() {
           />
         </button>
         {showNamesEditor && (
-          <div className="space-y-1.5">
-            {persons.map((p, i) => (
-              <div key={p.id} className="flex items-center gap-2">
-                <span
-                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-bold"
-                  style={{ background: memberColorMap[p.id], color: "var(--wm-ink)" }}
-                >
-                  {i + 1}
-                </span>
-                <Input
-                  className="h-9 flex-1 text-[13.5px]"
-                  placeholder={`${i + 1}人目 (例: たかし)`}
-                  value={p.name}
-                  onChange={(e) => {
-                    const value = e.target.value
-                    setPersons((prev) => prev.map((pp) => (pp.id === p.id ? { ...pp, name: value } : pp)))
-                  }}
-                  maxLength={20}
-                />
-              </div>
-            ))}
+          <div className="space-y-2">
+            {persons.map((p, i) => {
+              const w = weights[p.id] || "normal"
+              return (
+                <div key={p.id} className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-bold"
+                      style={{ background: memberColorMap[p.id], color: "var(--wm-ink)" }}
+                    >
+                      {i + 1}
+                    </span>
+                    <Input
+                      className="h-9 flex-1 text-[13.5px]"
+                      placeholder={`${i + 1}人目 (例: たかし)`}
+                      value={p.name}
+                      onChange={(e) => {
+                        const value = e.target.value
+                        setPersons((prev) =>
+                          prev.map((pp) => (pp.id === p.id ? { ...pp, name: value } : pp)),
+                        )
+                      }}
+                      maxLength={20}
+                    />
+                  </div>
+                  {isWeighted && (
+                    <div className="flex gap-1 pl-9">
+                      {(["less", "normal", "more"] as const).map((tier) => {
+                        const active = w === tier
+                        const label = tier === "more" ? "多め" : tier === "less" ? "少なめ" : "普通"
+                        return (
+                          <button
+                            key={tier}
+                            type="button"
+                            onClick={() =>
+                              setWeights((prev) => ({ ...prev, [p.id]: tier }))
+                            }
+                            className={`flex-1 rounded-[8px] border px-2 py-1.5 text-[11.5px] font-bold transition ${
+                              active
+                                ? tier === "more"
+                                  ? "border-orange-400 bg-orange-100 text-orange-700"
+                                  : tier === "less"
+                                  ? "border-blue-400 bg-blue-100 text-blue-700"
+                                  : "border-[var(--wm-accent)] bg-[var(--wm-accent-soft)] text-[var(--wm-accent-pressed)]"
+                                : "border-[var(--wm-line)] bg-card text-[var(--wm-ink-3)] hover:bg-[var(--wm-surface)]"
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+            {isWeighted && (
+              <p className="text-[11px] text-[var(--wm-ink-3)]">
+                比率: 多め × 1.5 / 普通 × 1.0 / 少なめ × 0.5
+              </p>
+            )}
           </div>
         )}
       </div>
 
-      {/* 丸めオプション */}
-      <div className="wm-card p-3">
+      {/* 割り方 */}
+      <div className="wm-card p-3 space-y-2">
         <Label className="text-[11px] font-semibold tracking-wider text-[var(--wm-ink-3)]">
-          1人あたりの単位
+          割り方
         </Label>
-        <div className="mt-2 grid grid-cols-4 gap-1.5">
+        <div className="grid grid-cols-2 gap-1.5">
+          <button
+            type="button"
+            onClick={() => setSplitMode("equal")}
+            className={`rounded-[10px] py-2 text-[12.5px] font-semibold transition ${
+              splitMode === "equal"
+                ? "bg-[var(--wm-accent)] text-white"
+                : "bg-[var(--wm-surface)] text-[var(--wm-ink-2)] hover:bg-[var(--wm-surface)]/80"
+            }`}
+            aria-pressed={splitMode === "equal"}
+          >
+            均等に割る
+          </button>
+          <button
+            type="button"
+            onClick={() => setSplitMode("weighted")}
+            className={`rounded-[10px] py-2 text-[12.5px] font-semibold transition ${
+              splitMode === "weighted"
+                ? "bg-[var(--wm-accent)] text-white"
+                : "bg-[var(--wm-surface)] text-[var(--wm-ink-2)] hover:bg-[var(--wm-surface)]/80"
+            }`}
+            aria-pressed={splitMode === "weighted"}
+          >
+            金額に差をつける
+          </button>
+        </div>
+        <p className="text-[11px] leading-relaxed text-[var(--wm-ink-3)]">
+          {splitMode === "weighted"
+            ? "「多め (×1.5)」「普通 (×1.0)」「少なめ (×0.5)」を各人に設定。よく飲む人を多めにできます。"
+            : "全員を均等に割ります。"}
+        </p>
+      </div>
+
+      {/* 集金単位 (1円・100円・500円・1000円きざみ) */}
+      <div className="wm-card p-3 space-y-2">
+        <Label className="text-[11px] font-semibold tracking-wider text-[var(--wm-ink-3)]">
+          1人あたりの金額の丸め (集金単位)
+        </Label>
+        <div className="grid grid-cols-4 gap-1.5">
           {ROUND_OPTIONS.map((opt) => {
             const active = roundMode === opt.value
             return (
@@ -402,7 +553,7 @@ export function SplitCalculator() {
             )
           })}
         </div>
-        <p className="mt-2 text-[11px] leading-relaxed text-[var(--wm-ink-3)]">
+        <p className="text-[11px] leading-relaxed text-[var(--wm-ink-3)]">
           {ROUND_OPTIONS.find((o) => o.value === roundMode)?.description}
         </p>
       </div>

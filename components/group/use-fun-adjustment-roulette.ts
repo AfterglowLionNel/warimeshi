@@ -21,7 +21,7 @@ const ROULETTE_ITEM_WIDTH = 128
 const ROULETTE_DURATION_MS = 5200
 const ROULETTE_LOOP_COUNT = 64
 // オーバーシュート (1個分行き過ぎてバウンスバック) 演出を起こす確率
-const ROULETTE_OVERSHOOT_CHANCE = 0.22
+const ROULETTE_OVERSHOOT_CHANCE = 0.33
 
 function getRouletteTravel(progress: number, totalDistance: number, overshoot: boolean) {
   // フェーズ1: 高速 (0 → 0.55): 線形に近い加速で大半の距離を進む

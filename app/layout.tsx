@@ -1,5 +1,6 @@
 import type React from "react"
 import type { Metadata, Viewport } from "next"
+import { headers } from "next/headers"
 import Script from "next/script"
 import { Zen_Kaku_Gothic_New, Inter } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
@@ -86,11 +87,12 @@ export const viewport: Viewport = {
   themeColor: "#C8553D",
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  const nonce = (await headers()).get("x-nonce") ?? undefined
   const enableAnalytics = process.env.NEXT_PUBLIC_VERCEL_ANALYTICS === "1"
   // ホワイトリスト判定: "development" のときのみ SW を全削除する。本番は SW を有効化。
   const isDev = process.env.NODE_ENV === "development"
@@ -127,6 +129,7 @@ export default function RootLayout({
     <html lang="ja" className={`${zenKakuGothicNew.variable} ${inter.variable}`}>
       <body className="font-sans antialiased">
         <script
+          nonce={nonce}
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
@@ -139,6 +142,7 @@ export default function RootLayout({
           // next/script の beforeInteractive は CSP nonce のハイドレーション不整合を起こすので、
           // プレーンな <script> を使う。
           <script
+            nonce={nonce}
             dangerouslySetInnerHTML={{
               __html: `(function(){
                 if(!('serviceWorker' in navigator)) return;
@@ -163,7 +167,7 @@ export default function RootLayout({
             }}
           />
         ) : (
-          <Script id="sw-register" strategy="afterInteractive">
+          <Script id="sw-register" nonce={nonce} strategy="afterInteractive">
             {`if('serviceWorker' in navigator){
               if(localStorage.getItem('sw-disabled')==='1'){
                 navigator.serviceWorker.getRegistrations().then(function(regs){

@@ -8,6 +8,7 @@ import { Loader2, CreditCard } from "lucide-react"
 import { toast } from "sonner"
 import { getGuestToken } from "@/lib/guest/guest-session"
 import { SettlementShareButton } from "./settlement-share-button"
+import type { Order, TableMember } from "@/lib/types/group"
 
 interface PaymentData {
   id: string
@@ -23,12 +24,26 @@ interface PaymentData {
 interface PaymentTrackerProps {
   tableId: string
   tableName: string
+  eventDate?: string | null
   refreshTrigger?: number
   currentMemberId: string
   memberColorMap?: Record<string, string>
+  members?: TableMember[]
+  orders?: Order[]
+  adjustmentSummary?: string | null
 }
 
-export function PaymentTracker({ tableId, tableName, refreshTrigger, currentMemberId, memberColorMap = {} }: PaymentTrackerProps) {
+export function PaymentTracker({
+  tableId,
+  tableName,
+  eventDate,
+  refreshTrigger,
+  currentMemberId,
+  memberColorMap = {},
+  members = [],
+  orders = [],
+  adjustmentSummary = null,
+}: PaymentTrackerProps) {
   const [payments, setPayments] = useState<PaymentData[]>([])
   const [memberAmounts, setMemberAmounts] = useState<Record<string, number>>({})
   const [totalAmount, setTotalAmount] = useState(0)
@@ -102,7 +117,7 @@ export function PaymentTracker({ tableId, tableName, refreshTrigger, currentMemb
     )
   }
 
-  if (payments.length === 0 || !payerId) {
+  if (!payerId || totalAmount <= 0) {
     return null
   }
 
@@ -113,34 +128,68 @@ export function PaymentTracker({ tableId, tableName, refreshTrigger, currentMemb
     isPaid: p.isPaid,
   }))
 
-  // Build full member list: payer + all from members
-  const allMemberEntries: { id: string; name: string; amount: number; isPayer: boolean; payment?: PaymentData }[] = []
+  const paymentByMemberId = new Map(payments.map((payment) => [payment.fromMemberId, payment]))
+  const displayMembers = members.length
+    ? members.map((member) => ({ id: member.id, name: member.display_name }))
+    : [
+        { id: payerId, name: payerName || "不明" },
+        ...payments.map((payment) => ({ id: payment.fromMemberId, name: payment.fromName })),
+      ]
 
-  // Add payer first
-  allMemberEntries.push({
-    id: payerId,
-    name: payerName || "不明",
-    amount: memberAmounts[payerId] || 0,
-    isPayer: true,
+  const allMemberEntries = displayMembers
+    .map((member) => ({
+      id: member.id,
+      name: member.name,
+      amount: memberAmounts[member.id] || 0,
+      isPayer: member.id === payerId,
+      payment: paymentByMemberId.get(member.id),
+    }))
+    .sort((a, b) => Number(b.isPayer) - Number(a.isPayer) || b.amount - a.amount)
+
+  const shareMembers = members.length
+    ? members.map((member) => ({ id: member.id, name: member.display_name }))
+    : allMemberEntries.map((entry) => ({ id: entry.id, name: entry.name }))
+
+  const shareMemberSummaries = shareMembers.map((member) => ({
+    memberName: member.name,
+    amount: memberAmounts[member.id] || 0,
+    isPayer: member.id === payerId,
+    color: memberColorMap[member.id],
+  }))
+
+  const shareBreakdowns = shareMembers.map((member) => {
+    const memberOrders = orders
+      .filter((order) => order.member_id === member.id && !order.deleted_at)
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+
+    return {
+      memberName: member.name || "不明",
+      totalAmount: memberOrders.reduce((sum, order) => sum + order.line_total, 0),
+      color: memberColorMap[member.id],
+      items: memberOrders.map((order) => ({
+        itemName: order.item_name || "名称なし",
+        quantity: order.quantity,
+        amount: order.line_total,
+      })),
+    }
   })
-
-  // Add other members
-  for (const p of payments) {
-    allMemberEntries.push({
-      id: p.fromMemberId,
-      name: p.fromName,
-      amount: p.amount,
-      isPayer: false,
-      payment: p,
-    })
-  }
 
   return (
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-base flex items-center justify-between">
           <span>支払い</span>
-          <SettlementShareButton tableName={tableName} perPerson={memberAmounts[currentMemberId] || 0} entries={shareEntries} />
+          <SettlementShareButton
+            tableName={tableName}
+            eventDate={eventDate}
+            perPerson={memberAmounts[currentMemberId] || 0}
+            entries={shareEntries}
+            totalAmount={totalAmount}
+            payerName={payerName}
+            adjustmentSummary={adjustmentSummary}
+            memberSummaries={shareMemberSummaries}
+            breakdowns={shareBreakdowns}
+          />
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
@@ -158,11 +207,13 @@ export function PaymentTracker({ tableId, tableName, refreshTrigger, currentMemb
           >
             {entry.isPayer ? (
               <CreditCard className="h-4 w-4 text-primary flex-shrink-0" />
-            ) : (
+            ) : entry.payment ? (
               <Checkbox
                 checked={entry.payment?.isPaid || false}
                 onCheckedChange={(checked) => entry.payment && togglePaid(entry.payment.id, !!checked)}
               />
+            ) : (
+              <span className="h-4 w-4 flex-shrink-0" />
             )}
             <span className={`flex-1 text-sm font-medium ${entry.payment?.isPaid ? "line-through text-muted-foreground" : ""}`}>
               {entry.name}

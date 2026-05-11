@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { CalculationMode, FareSettings, Modifier, Segment, VehicleType } from "@/lib/types/taxi"
@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { Calculator, Car, ChevronDown, Plus, Trash2, Truck } from "lucide-react"
+import { Car, ChevronDown, Minus, Moon, Plus, Settings2, Trash2, Truck } from "lucide-react"
 import { toast } from "sonner"
 
 interface TaxiCalculatorProps {
@@ -36,6 +36,8 @@ const DEFAULT_DAIKO_SETTINGS: FareSettings = {
   pickupFee: 0,
 }
 
+const NIGHT_SURCHARGE_ID = "_preset_night"
+
 type SegmentShareResult = Segment & {
   riderCount: number
   segmentFare: number
@@ -47,6 +49,88 @@ type PassengerShare = {
   name: string
   amount: number
   count: number  // この地点で降りる人数
+}
+
+type TotalResult = {
+  mode: "total"
+  totalFare: number
+  perPerson: number
+  personCount: number
+  remainder: number
+}
+
+type SameResult = {
+  mode: "same"
+  totalDistance: number
+  totalFare: number
+  perPerson: number
+  personCount: number
+  remainder: number
+  pickupPerPerson: number
+}
+
+type SegmentsResult = {
+  mode: "segments"
+  totalDistance: number
+  totalFare: number
+  pricePerKm: number
+  pickupPerPerson: number
+  totalPassengers: number
+  segments: SegmentShareResult[]
+  passengers: PassengerShare[]
+}
+
+type CalcResult = TotalResult | SameResult | SegmentsResult
+
+const PERSON_MIN = 1
+const PERSON_MAX = 30
+
+function clampPersonCount(value: number) {
+  if (!Number.isFinite(value)) return PERSON_MIN
+  return Math.min(PERSON_MAX, Math.max(PERSON_MIN, Math.floor(value)))
+}
+
+function PersonStepper({
+  value,
+  onChange,
+  ariaLabel = "人数",
+}: {
+  value: number
+  onChange: (next: number) => void
+  ariaLabel?: string
+}) {
+  const dec = () => onChange(clampPersonCount(value - 1))
+  const inc = () => onChange(clampPersonCount(value + 1))
+  return (
+    <div
+      className="inline-flex items-stretch overflow-hidden rounded-[14px] border border-[var(--wm-line)] bg-card"
+      role="group"
+      aria-label={ariaLabel}
+    >
+      <button
+        type="button"
+        onClick={dec}
+        disabled={value <= PERSON_MIN}
+        className="inline-flex h-12 w-12 items-center justify-center text-[var(--wm-ink-2)] transition active:bg-[var(--wm-surface)] disabled:opacity-30"
+        aria-label="減らす"
+      >
+        <Minus className="h-5 w-5" />
+      </button>
+      <div className="flex min-w-[64px] items-center justify-center border-x border-[var(--wm-line)] px-3">
+        <span className="wm-num text-[20px] font-bold tabular-nums leading-none">{value}</span>
+        <span className="ml-0.5 text-[12px] text-[var(--wm-ink-3)]">人</span>
+      </div>
+      <button
+        type="button"
+        onClick={inc}
+        disabled={value >= PERSON_MAX}
+        className="inline-flex h-12 w-12 items-center justify-center text-[var(--wm-ink-2)] transition active:bg-[var(--wm-surface)] disabled:opacity-30"
+        aria-label="増やす"
+      >
+        <Plus className="h-5 w-5" />
+      </button>
+    </div>
+  )
 }
 
 export function TaxiCalculator({
@@ -63,12 +147,16 @@ export function TaxiCalculator({
   const setSettings = vehicleType === "taxi" ? setTaxiSettings : setDaikoSettings
 
   const [modifiers, setModifiers] = useState<Modifier[]>([])
-  const [mode, setMode] = useState<CalculationMode>("same")
+  const [nightSurcharge, setNightSurcharge] = useState(false)
+  const [mode, setMode] = useState<CalculationMode>("total")
+  const [totalAmount, setTotalAmount] = useState("")
+  const [totalPersonCount, setTotalPersonCount] = useState(2)
   const [sameDistance, setSameDistance] = useState("")
-  const [samePersonCount, setSamePersonCount] = useState("1")
+  const [samePersonCount, setSamePersonCount] = useState(2)
   const [segments, setSegments] = useState<Segment[]>([{ id: "1", name: "", distanceKm: 0, dropCount: 1 }])
   const [, setIsSaving] = useState(false)
-  const [showLongDistanceSettings, setShowLongDistanceSettings] = useState(vehicleType === "daiko")
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [showLongDistanceSettings, setShowLongDistanceSettings] = useState(false)
   const [expandedSegments, setExpandedSegments] = useState<Set<string>>(new Set())
   const lastSavedHash = useRef<string | null>(null)
   const lastRemoteCreatedAt = useRef<string | null>(null)
@@ -84,12 +172,20 @@ export function TaxiCalculator({
     }
     if (data.input) {
       const input = data.input as Record<string, unknown>
+      setTotalAmount((input.totalAmount as string) ?? "")
+      const tp = Number.parseInt(String(input.totalPersonCount ?? ""), 10)
+      setTotalPersonCount(Number.isFinite(tp) && tp > 0 ? clampPersonCount(tp) : 2)
       setSameDistance((input.sameDistance as string) ?? "")
-      setSamePersonCount((input.samePersonCount as string) ?? "1")
+      const sp = Number.parseInt(String(input.samePersonCount ?? ""), 10)
+      setSamePersonCount(Number.isFinite(sp) && sp > 0 ? clampPersonCount(sp) : 2)
       // 後方互換: dropCountがないセグメントにはデフォルト1を設定
       const savedSegments = ((input.segments as Segment[]) ?? [{ id: "1", name: "", distanceKm: 0, dropCount: 1 }])
       setSegments(savedSegments.map((s: Segment) => ({ ...s, dropCount: s.dropCount ?? 1 })))
-      setMode((input.mode as CalculationMode) ?? "same")
+      setMode((input.mode as CalculationMode) ?? "total")
+      setNightSurcharge(Boolean(input.nightSurcharge))
+      if (Array.isArray(input.modifiers)) {
+        setModifiers(input.modifiers as Modifier[])
+      }
     }
     if (data.created_at) {
       lastRemoteCreatedAt.current = data.created_at as string
@@ -148,36 +244,45 @@ export function TaxiCalculator({
   const hasLongDistance = (settings.extraFromKm !== undefined && !Number.isNaN(settings.extraFromKm) && settings.extraFromKm > 0) ||
     (settings.extraPerKm !== undefined && !Number.isNaN(settings.extraPerKm) && settings.extraPerKm > 0)
 
-  const settingsInvalid =
-    // 基本パラメータ: baseKm > 0, その他 >= 0
-    (settings.baseKm === undefined || Number.isNaN(settings.baseKm) || settings.baseKm <= 0) ||
-    [settings.basePrice, settings.perKmPrice, settings.pickupFee].some(
-      (v) => v === undefined || Number.isNaN(v) || v < 0,
-    ) ||
-    // 長距離設定: 片方のみ入力は不可
-    (hasLongDistance && (
-      settings.extraFromKm === undefined || Number.isNaN(settings.extraFromKm) || settings.extraFromKm <= 0 ||
-      settings.extraPerKm === undefined || Number.isNaN(settings.extraPerKm) || settings.extraPerKm < 0
-    )) ||
-    // 長距離閾値は初乗り距離以上であること
-    (hasLongDistance && settings.extraFromKm !== undefined && !Number.isNaN(settings.extraFromKm) &&
-      settings.extraFromKm < (settings.baseKm || 0))
+  const settingsInvalid = mode === "total"
+    ? false
+    : (
+      // 基本パラメータ: baseKm > 0, その他 >= 0
+      (settings.baseKm === undefined || Number.isNaN(settings.baseKm) || settings.baseKm <= 0) ||
+      [settings.basePrice, settings.perKmPrice, settings.pickupFee].some(
+        (v) => v === undefined || Number.isNaN(v) || v < 0,
+      ) ||
+      // 長距離設定: 片方のみ入力は不可
+      (hasLongDistance && (
+        settings.extraFromKm === undefined || Number.isNaN(settings.extraFromKm) || settings.extraFromKm <= 0 ||
+        settings.extraPerKm === undefined || Number.isNaN(settings.extraPerKm) || settings.extraPerKm < 0
+      )) ||
+      // 長距離閾値は初乗り距離以上であること
+      (hasLongDistance && settings.extraFromKm !== undefined && !Number.isNaN(settings.extraFromKm) &&
+        settings.extraFromKm < (settings.baseKm || 0))
+    )
 
-  const results = useMemo<
-    | { mode: "same"; totalDistance: number; totalFare: number; perPerson: number; personCount: number; remainder: number; pickupPerPerson: number }
-    | {
-        mode: "segments"
-        totalDistance: number
-        totalFare: number
-        pricePerKm: number
-        pickupPerPerson: number
-        totalPassengers: number
-        segments: SegmentShareResult[]
-        passengers: PassengerShare[]
-      }
-    | null
-  >(() => {
-    // Helper functions moved inside useMemo to satisfy exhaustive-deps
+  // 深夜割増プリセットを内部 modifier として合成
+  const effectiveModifiers = useMemo<Modifier[]>(() => {
+    if (!nightSurcharge) return modifiers
+    return [
+      ...modifiers,
+      { id: NIGHT_SURCHARGE_ID, name: "深夜割増", amount: 20, type: "percent", direction: "add", enabled: true },
+    ]
+  }, [modifiers, nightSurcharge])
+
+  const results = useMemo<CalcResult | null>(() => {
+    // total モード: 総額を直接入力 → 人数で均等割り
+    if (mode === "total") {
+      const total = Number.parseInt(totalAmount, 10)
+      const personCount = clampPersonCount(totalPersonCount)
+      if (!Number.isFinite(total) || total <= 0 || personCount <= 0) return null
+      const perPerson = Math.floor(total / personCount)
+      const remainder = total - perPerson * personCount
+      return { mode: "total" as const, totalFare: total, perPerson, personCount, remainder }
+    }
+
+    // 距離ベース: 内部 helper
     const calculateBaseFare = (distanceKm: number) => {
       if (distanceKm <= 0) return 0
       let fare = (settings.basePrice || 0) + (settings.pickupFee || 0)
@@ -196,7 +301,7 @@ export function TaxiCalculator({
 
     const applyModifiers = (baseFare: number) => {
       let fare = baseFare
-      for (const mod of modifiers) {
+      for (const mod of effectiveModifiers) {
         if (!mod.enabled) continue
         const adjustment = mod.type === "fixed" ? mod.amount : Math.floor(baseFare * (mod.amount / 100))
         fare = mod.direction === "add" ? fare + adjustment : fare - adjustment
@@ -210,13 +315,11 @@ export function TaxiCalculator({
 
     if (mode === "same") {
       const distance = Number.parseFloat(sameDistance) || 0
-      const personCount = Number.parseInt(samePersonCount, 10) || 1
+      const personCount = clampPersonCount(samePersonCount)
       if (distance <= 0 || personCount <= 0) return null
       const baseFare = calculateBaseFare(distance)
       const totalFare = applyModifiers(baseFare)
 
-      // 同距離モードでは全員同じ距離なので迎車分割も距離按分も結果は同じ
-      // 合計一致の端数配分: floor + remainder
       const perPerson = Math.floor(totalFare / personCount)
       const remainder = totalFare - perPerson * personCount
       const pickupPerPerson = personCount > 0 ? Math.round(pickupFee / personCount) : 0
@@ -228,22 +331,18 @@ export function TaxiCalculator({
     const totalDistance = validSegments.reduce((sum, s) => sum + s.distanceKm, 0)
     if (totalDistance <= 0) return null
 
-    // 乗車人数 = 全区間のdropCountの合計
     const totalPassengers = validSegments.reduce((sum, s) => sum + (s.dropCount || 1), 0)
     if (totalPassengers <= 0) return null
 
     const baseFare = calculateBaseFare(totalDistance)
     const totalFare = applyModifiers(baseFare)
 
-    // 迎車料金は全員で均等分割、残りは距離按分
     const pickupPortion = Math.min(pickupFee, totalFare)
     const distancePortion = totalFare - pickupPortion
     const pricePerKm = totalDistance > 0 ? distancePortion / totalDistance : 0
 
-    // 迎車料金の一人あたり（理論値）
     const pickupPerPersonRaw = totalPassengers > 0 ? pickupPortion / totalPassengers : 0
 
-    // 各区間の乗車人数を計算（降車済み人数を累積）
     let cumulativeDrops = 0
     const riderCounts: number[] = validSegments.map((s) => {
       const riders = totalPassengers - cumulativeDrops
@@ -251,7 +350,6 @@ export function TaxiCalculator({
       return riders
     })
 
-    // 距離按分の理論値を各降車地点ごとに蓄積
     const distanceTotalsRaw = new Array<number>(validSegments.length).fill(0)
 
     const segmentResults: SegmentShareResult[] = validSegments.map((s, idx) => {
@@ -259,7 +357,6 @@ export function TaxiCalculator({
       const riderCount = riderCounts[idx]
       const perPersonShareRaw = riderCount > 0 ? segmentFareRaw / riderCount : 0
 
-      // この区間以降に降りる全員に距離按分を加算
       for (let i = idx; i < validSegments.length; i++) {
         distanceTotalsRaw[i] += perPersonShareRaw
       }
@@ -272,32 +369,24 @@ export function TaxiCalculator({
       }
     })
 
-    // 各降車地点の一人あたり支払い = 距離按分 + 迎車均等分
     const passengerTotalsRaw = distanceTotalsRaw.map(v => v + pickupPerPersonRaw)
 
-    // 合計一致の端数配分:
-    // 1. 全員 floor で円に落とす（dropCount考慮）
     const passengerAmounts = passengerTotalsRaw.map(v => Math.floor(v))
-    // 2. 不足分を計算（各地点の人数 × 金額の合計がtotalFareに一致すべき）
     const currentTotal = passengerAmounts.reduce((sum, v, idx) => sum + v * (validSegments[idx].dropCount || 1), 0)
     let remainderToDistribute = totalFare - currentTotal
-    // 3. 端数（小数部分）が大きい降車地点から、dropCount分ずつ配分
     const fractionalParts = passengerTotalsRaw
       .map((raw, idx) => ({ idx, frac: raw - Math.floor(raw), dropCount: validSegments[idx].dropCount || 1 }))
       .sort((a, b) => b.frac - a.frac)
     for (const { idx, dropCount } of fractionalParts) {
       if (remainderToDistribute <= 0) break
-      // この地点のdropCount人全員に+1円（合計でdropCount円増加）
       if (remainderToDistribute >= dropCount) {
         passengerAmounts[idx] += 1
         remainderToDistribute -= dropCount
       } else {
-        // 余りがdropCountより少ない場合は1円ずつ（表示上は同額にならないが合計一致優先）
         passengerAmounts[idx] += 1
         remainderToDistribute -= dropCount
       }
     }
-    // 残りがまだある場合（稀だが安全のため）
     for (let i = 0; remainderToDistribute > 0 && i < passengerAmounts.length; i++) {
       passengerAmounts[i] += 1
       remainderToDistribute -= (validSegments[i].dropCount || 1)
@@ -313,7 +402,7 @@ export function TaxiCalculator({
     const pickupPerPerson = Math.round(pickupPerPersonRaw)
 
     return { mode: "segments" as const, totalDistance, totalFare, pricePerKm, pickupPerPerson, totalPassengers, segments: segmentResults, passengers }
-  }, [mode, sameDistance, samePersonCount, segments, settings, modifiers, settingsInvalid])
+  }, [mode, totalAmount, totalPersonCount, sameDistance, samePersonCount, segments, settings, effectiveModifiers, settingsInvalid])
 
   // Auto-save to DB when results change
   useEffect(() => {
@@ -323,7 +412,7 @@ export function TaxiCalculator({
       vehicleType,
       mode,
       settings,
-      input: { sameDistance, samePersonCount, segments, mode, vehicleType },
+      input: { totalAmount, totalPersonCount, sameDistance, samePersonCount, segments, mode, vehicleType, nightSurcharge, modifiers },
       result: results,
     })
     if (payloadHash === lastSavedHash.current) return
@@ -338,7 +427,7 @@ export function TaxiCalculator({
           vehicleType,
           mode,
           settings,
-          input: { sameDistance, samePersonCount, segments, mode, vehicleType },
+          input: { totalAmount, totalPersonCount, sameDistance, samePersonCount, segments, mode, vehicleType, nightSurcharge, modifiers },
           result: results,
         }),
       })
@@ -358,381 +447,190 @@ export function TaxiCalculator({
     }
 
     void save()
-  }, [results, tableId, currentUserId, vehicleType, mode, settings, sameDistance, samePersonCount, segments])
+  }, [results, tableId, currentUserId, vehicleType, mode, settings, totalAmount, totalPersonCount, sameDistance, samePersonCount, segments, nightSurcharge, modifiers])
+
+  const isDistanceMode = mode === "same" || mode === "segments"
 
   return (
-    <div className="space-y-4">
-      {/* 車種切替 wm-tabs */}
+    <div className="space-y-3">
+      {/* モードタブ */}
       <div className="wm-tabs">
         <button
           type="button"
-          className={`wm-tab ${vehicleType === "taxi" ? "is-active" : ""}`}
-          onClick={() => setVehicleType("taxi")}
+          className={`wm-tab ${mode === "total" ? "is-active" : ""}`}
+          onClick={() => setMode("total")}
         >
-          <Car className="mr-1.5 inline-block h-3.5 w-3.5" />
-          タクシー
+          金額
         </button>
         <button
           type="button"
-          className={`wm-tab ${vehicleType === "daiko" ? "is-active" : ""}`}
-          onClick={() => setVehicleType("daiko")}
+          className={`wm-tab ${mode === "same" ? "is-active" : ""}`}
+          onClick={() => setMode("same")}
         >
-          <Truck className="mr-1.5 inline-block h-3.5 w-3.5" />
-          運転代行
+          距離
+        </button>
+        <button
+          type="button"
+          className={`wm-tab ${mode === "segments" ? "is-active" : ""}`}
+          onClick={() => setMode("segments")}
+        >
+          区間別
         </button>
       </div>
 
-      {/* 料金設定 */}
-      <div className="wm-card p-4 space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="wm-h3 text-[14px] font-semibold">料金設定</h3>
-          <span className="wm-meta">{vehicleType === "taxi" ? "タクシー" : "運転代行"}</span>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
+      {/* メイン入力カード */}
+      {mode === "total" && (
+        <div className="wm-card p-4 space-y-4">
           <div>
-            <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">
-              初乗り距離 (km)
-            </Label>
+            <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">メーター金額</Label>
+            <div className="relative mt-1.5">
+              <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[22px] font-semibold text-[var(--wm-ink-3)]">¥</span>
+              <Input
+                type="number"
+                inputMode="numeric"
+                min="0"
+                placeholder="3200"
+                className="wm-num h-14 pl-10 pr-4 text-right text-[26px] font-bold placeholder:text-[var(--wm-ink-4)] placeholder:font-normal"
+                value={totalAmount}
+                onChange={(e) => setTotalAmount(e.target.value.replace(/[^\d]/g, ""))}
+              />
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">人数</Label>
+            <PersonStepper value={totalPersonCount} onChange={setTotalPersonCount} />
+          </div>
+        </div>
+      )}
+
+      {mode === "same" && (
+        <div className="wm-card p-4 space-y-4">
+          <div>
+            <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">距離 (km)</Label>
             <Input
               type="number"
               step="0.1"
               min="0"
-              className="wm-num mt-1"
-              value={Number.isNaN(settings.baseKm) ? "" : settings.baseKm}
-              onChange={(e) => updateSetting("baseKm", e.target.value, Number.parseFloat)}
+              inputMode="decimal"
+              className="wm-num mt-1.5 h-14 text-right text-[24px] font-bold placeholder:text-[var(--wm-ink-4)] placeholder:font-normal"
+              placeholder="5.0"
+              value={sameDistance}
+              onChange={(e) => setSameDistance(e.target.value)}
             />
           </div>
-          <div>
-            <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">初乗り料金</Label>
-            <Input
-              type="number"
-              min="0"
-              className="wm-num mt-1"
-              value={Number.isNaN(settings.basePrice) ? "" : settings.basePrice}
-              onChange={(e) => updateSetting("basePrice", e.target.value, Number.parseInt)}
-            />
-          </div>
-          <div>
-            <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">
-              加算単価 (/km)
-            </Label>
-            <Input
-              type="number"
-              min="0"
-              className="wm-num mt-1"
-              value={Number.isNaN(settings.perKmPrice) ? "" : settings.perKmPrice}
-              onChange={(e) => updateSetting("perKmPrice", e.target.value, Number.parseInt)}
-            />
-          </div>
-          <div>
-            <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">迎車料金</Label>
-            <Input
-              type="number"
-              min="0"
-              className="wm-num mt-1"
-              value={Number.isNaN(settings.pickupFee) ? "" : settings.pickupFee}
-              onChange={(e) => updateSetting("pickupFee", e.target.value, Number.parseInt)}
-            />
+          <div className="flex items-center justify-between">
+            <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">人数</Label>
+            <PersonStepper value={samePersonCount} onChange={setSamePersonCount} />
           </div>
         </div>
+      )}
 
-        <Collapsible open={showLongDistanceSettings} onOpenChange={setShowLongDistanceSettings}>
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost" size="sm" className="w-full justify-between text-[13px]">
-              長距離割増設定
-              <ChevronDown className={`h-4 w-4 transition-transform ${showLongDistanceSettings ? "rotate-180" : ""}`} />
-            </Button>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="pt-2">
-            <div className="grid grid-cols-2 gap-3 rounded-[12px] bg-[var(--wm-surface)] p-3">
-              <div>
-                <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">
-                  長距離閾値 (km)
-                </Label>
-                <Input
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  className="wm-num mt-1 bg-card"
-                  placeholder={vehicleType === "daiko" ? "10" : "未設定"}
-                  value={Number.isNaN(settings.extraFromKm ?? Number.NaN) ? "" : settings.extraFromKm}
-                  onChange={(e) => updateSetting("extraFromKm", e.target.value, Number.parseFloat)}
-                />
-              </div>
-              <div>
-                <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">
-                  追加単価 (/km)
-                </Label>
-                <Input
-                  type="number"
-                  min="0"
-                  className="wm-num mt-1 bg-card"
-                  placeholder={vehicleType === "daiko" ? "100" : "未設定"}
-                  value={Number.isNaN(settings.extraPerKm ?? Number.NaN) ? "" : settings.extraPerKm}
-                  onChange={(e) => updateSetting("extraPerKm", e.target.value, Number.parseInt)}
-                />
-              </div>
-              <p className="col-span-2 text-[11px] text-[var(--wm-ink-3)]">
-                閾値を超えた距離分に追加単価が上乗せされます
-              </p>
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
-        {settingsInvalid && (
-          <p className="text-[12px] text-destructive">
-            {(settings.baseKm === undefined || Number.isNaN(settings.baseKm) || settings.baseKm <= 0)
-              ? "初乗り距離は0より大きい値を入力してください。"
-              : hasLongDistance && settings.extraFromKm !== undefined && !Number.isNaN(settings.extraFromKm) && settings.extraFromKm < (settings.baseKm || 0)
-              ? "長距離閾値は初乗り距離以上に設定してください。"
-              : "0以上の値をすべて入力してください。"}
+      {mode === "segments" && (
+        <div className="wm-card p-4 space-y-3">
+          <p className="text-[12px] leading-relaxed text-[var(--wm-ink-2)]">
+            降車順に距離と降りる人数を入力。距離料金は乗車中の人数で按分されます。
           </p>
-        )}
-      </div>
 
-      {/* 割増・割引オプション */}
-      <div className="wm-card p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="wm-h3 text-[14px] font-semibold">割増・割引</h3>
-          <Button variant="outline" size="sm" onClick={addModifier} className="bg-card">
-            <Plus className="mr-1 h-4 w-4" />
-            追加
-          </Button>
-        </div>
-        <div>
-          {modifiers.length === 0 ? (
-            <p className="text-center text-[12px] text-[var(--wm-ink-3)] py-4">オプションはありません</p>
-          ) : (<>
-            <p className="mb-2 text-[11px] text-[var(--wm-ink-3)]">※ % は基本運賃 (距離料金 + 迎車料金) に対して適用 (切り捨て)</p>
-            <div className="space-y-3">
-              {modifiers.map((mod) => (
+          <div className="space-y-2">
+            {segments.map((seg, index) => {
+              const isLast = index === segments.length - 1
+              return (
                 <div
-                  key={mod.id}
-                  className="grid grid-cols-1 gap-2 p-3 bg-muted/50 rounded sm:grid-cols-[auto,1fr,120px,110px,110px,auto] sm:items-center"
+                  key={seg.id}
+                  className="rounded-[14px] border border-[var(--wm-line)] bg-card p-3 space-y-2.5"
                 >
                   <div className="flex items-center gap-2">
-                    <Switch checked={mod.enabled} onCheckedChange={(checked) => updateModifier(mod.id, { enabled: checked })} />
-                    <span className="text-xs text-muted-foreground hidden sm:inline">適用</span>
-                  </div>
-                  <Input
-                    placeholder="名称"
-                    className="h-10 sm:h-8 w-full"
-                    value={mod.name}
-                    onChange={(e) => updateModifier(mod.id, { name: e.target.value })}
-                  />
-                  <Input
-                    type="number"
-                    className="h-10 sm:h-8 w-full"
-                    value={Number.isNaN(mod.amount) ? "" : mod.amount}
-                    onChange={(e) =>
-                      updateModifier(mod.id, {
-                        amount: e.target.value === "" ? Number.NaN : Number.parseFloat(e.target.value),
-                      })
-                    }
-                  />
-                  <Select value={mod.type} onValueChange={(v) => updateModifier(mod.id, { type: v as "fixed" | "percent" })}>
-                    <SelectTrigger className="w-full sm:w-24 h-10 sm:h-8">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="fixed">円</SelectItem>
-                      <SelectItem value="percent">%</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select
-                    value={mod.direction}
-                    onValueChange={(v) => updateModifier(mod.id, { direction: v as "add" | "subtract" })}
-                  >
-                    <SelectTrigger className="w-full sm:w-24 h-10 sm:h-8">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="add">加算</SelectItem>
-                      <SelectItem value="subtract">減算</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-10 w-10 sm:h-8 sm:w-8 text-destructive hover:text-destructive justify-self-start"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>オプションを削除しますか？</AlertDialogTitle>
-                        <AlertDialogDescription>この操作は取り消せません。</AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>キャンセル</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => removeModifier(mod.id)}>削除する</AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </div>
-              ))}
-            </div>
-          </>)}
-        </div>
-      </div>
-
-      {/* 距離入力 */}
-      <div className="wm-card p-4 space-y-3">
-        <div className="flex items-center gap-2">
-          <Calculator className="h-4 w-4 text-[var(--wm-ink-2)]" />
-          <h3 className="wm-h3 text-[14px] font-semibold">距離入力</h3>
-        </div>
-
-        <div className="wm-tabs">
-          <button
-            type="button"
-            className={`wm-tab ${mode === "same" ? "is-active" : ""}`}
-            onClick={() => setMode("same")}
-          >
-            全員同じ距離
-          </button>
-          <button
-            type="button"
-            className={`wm-tab ${mode === "segments" ? "is-active" : ""}`}
-            onClick={() => setMode("segments")}
-          >
-            区間別
-          </button>
-        </div>
-
-        {mode === "same" && (
-          <div className="grid grid-cols-2 gap-3 pt-1">
-            <div>
-              <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">距離 (km)</Label>
-              <Input
-                type="number"
-                step="0.1"
-                min="0"
-                inputMode="decimal"
-                className="wm-num mt-1"
-                placeholder="5.0"
-                value={sameDistance}
-                onChange={(e) => setSameDistance(e.target.value)}
-              />
-            </div>
-            <div>
-              <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">人数</Label>
-              <Input
-                type="number"
-                min="1"
-                inputMode="numeric"
-                className="wm-num mt-1"
-                value={samePersonCount}
-                onChange={(e) => setSamePersonCount(e.target.value)}
-              />
-            </div>
-          </div>
-        )}
-
-        {mode === "segments" && (
-          <div className="space-y-3 pt-1">
-            <div className="rounded-[12px] bg-[var(--wm-surface)] p-3 text-[12px] text-[var(--wm-ink-2)]">
-              降車順に、各区間の距離と降車人数を入力してください。距離料金は乗車中の人数で按分、迎車料金は全員で均等分割されます。
-            </div>
-
-            {/* 区間タイムライン入力 */}
-            <div className="relative pl-7">
-              <div
-                className="absolute left-[11px] top-3 bottom-3 w-[2px]"
-                style={{ background: "var(--wm-line-strong)" }}
-              />
-              {segments.map((seg, index) => {
-                const isLast = index === segments.length - 1
-                return (
-                  <div key={seg.id} className="relative pb-3">
                     <span
-                      className="absolute -left-[28px] top-2 inline-flex h-[20px] w-[20px] items-center justify-center rounded-full text-[10px] font-bold text-white"
-                      style={{
-                        background: isLast ? "var(--wm-accent)" : "var(--wm-ink-3)",
-                      }}
+                      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
+                      style={{ background: isLast ? "var(--wm-accent)" : "var(--wm-ink-3)" }}
                     >
                       {index + 1}
                     </span>
-                    <div className="flex items-center gap-1.5">
-                      <Input
-                        placeholder="降りる人・地点"
-                        className="h-9 flex-1 text-[13px]"
-                        value={seg.name}
-                        onChange={(e) => updateSegment(seg.id, { name: e.target.value })}
-                      />
-                      <Input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        inputMode="decimal"
-                        placeholder="km"
-                        className="wm-num h-9 w-16 text-right text-[13px]"
-                        value={seg.distanceKm || ""}
-                        onChange={(e) =>
-                          updateSegment(seg.id, { distanceKm: e.target.value === "" ? 0 : Number.parseFloat(e.target.value) })
-                        }
-                      />
-                      <Input
-                        type="number"
-                        min="1"
-                        inputMode="numeric"
-                        placeholder="人"
-                        className="wm-num h-9 w-12 text-center text-[13px]"
-                        value={seg.dropCount || 1}
-                        onChange={(e) =>
-                          updateSegment(seg.id, { dropCount: Math.max(1, Number.parseInt(e.target.value, 10) || 1) })
-                        }
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeSegment(seg.id)}
-                        disabled={segments.length === 1}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-[var(--wm-ink-3)] transition hover:bg-[var(--wm-surface)] hover:text-destructive disabled:opacity-40 disabled:hover:bg-transparent"
-                        aria-label="削除"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                    <Input
+                      placeholder="降りる人・地点 (任意)"
+                      className="h-10 flex-1 text-[13.5px]"
+                      value={seg.name}
+                      onChange={(e) => updateSegment(seg.id, { name: e.target.value })}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeSegment(seg.id)}
+                      disabled={segments.length === 1}
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-[var(--wm-ink-3)] transition active:bg-[var(--wm-surface)] active:text-destructive disabled:opacity-30"
+                      aria-label="この区間を削除"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label className="text-[11px] text-[var(--wm-ink-3)]">この区間の距離</Label>
+                      <div className="relative mt-1">
+                        <Input
+                          type="number"
+                          step="0.1"
+                          min="0"
+                          inputMode="decimal"
+                          placeholder="0.0"
+                          className="wm-num h-11 pr-9 text-right text-[15px] font-semibold placeholder:text-[var(--wm-ink-4)] placeholder:font-normal"
+                          value={seg.distanceKm || ""}
+                          onChange={(e) =>
+                            updateSegment(seg.id, { distanceKm: e.target.value === "" ? 0 : Number.parseFloat(e.target.value) })
+                          }
+                        />
+                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[12px] text-[var(--wm-ink-3)]">km</span>
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-[11px] text-[var(--wm-ink-3)]">降りる人数</Label>
+                      <div className="mt-1">
+                        <PersonStepper
+                          value={Math.max(1, seg.dropCount || 1)}
+                          onChange={(n) => updateSegment(seg.id, { dropCount: clampPersonCount(n) })}
+                          ariaLabel="この区間で降りる人数"
+                        />
+                      </div>
                     </div>
                   </div>
-                )
-              })}
-            </div>
-
-            <Button variant="outline" size="sm" onClick={addSegment} className="bg-card">
-              <Plus className="mr-1 h-4 w-4" />
-              区間を追加
-            </Button>
+                </div>
+              )
+            })}
           </div>
-        )}
-      </div>
 
+          <Button variant="outline" size="sm" onClick={addSegment} className="w-full bg-card h-11">
+            <Plus className="mr-1 h-4 w-4" />
+            区間を追加
+          </Button>
+        </div>
+      )}
+
+      {/* 結果カード */}
       {results && (
         <>
-          {/* 黒地 合計カード (デザインの Taxi 計算結果ヘッダー) */}
           <div
             className="rounded-2xl p-5"
             style={{ background: "var(--wm-ink)", color: "#fff" }}
           >
-            <div className="flex items-start justify-between">
-              <div>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
                 <div className="text-[11px] font-semibold tracking-[.1em] opacity-60">
-                  合計料金 ({results.totalDistance.toFixed(1)} km)
+                  {results.mode === "total"
+                    ? "合計料金"
+                    : `合計料金 (${results.totalDistance.toFixed(1)} km)`}
                 </div>
                 <div className="wm-num mt-1 text-[30px] font-bold leading-none tracking-tight">
                   ¥{results.totalFare.toLocaleString()}
                 </div>
               </div>
-              {results.mode === "same" && (
-                <div className="text-right">
+              {(results.mode === "total" || results.mode === "same") && (
+                <div className="text-right shrink-0">
                   <div className="text-[11px] font-semibold tracking-[.1em] opacity-60">
                     1人あたり
                   </div>
                   <div className="wm-num mt-1 text-[22px] font-bold">
                     ¥{results.perPerson.toLocaleString()}
                     {results.remainder > 0 && (
-                      <span className="text-[12px] font-medium opacity-70">
+                      <span className="ml-0.5 text-[12px] font-medium opacity-70">
                         〜¥{(results.perPerson + 1).toLocaleString()}
                       </span>
                     )}
@@ -741,14 +639,12 @@ export function TaxiCalculator({
               )}
             </div>
 
-            {/* same モード: 端数の補足 */}
-            {results.mode === "same" && results.remainder > 0 && (
+            {(results.mode === "total" || results.mode === "same") && results.remainder > 0 && (
               <div className="mt-3 rounded-[10px] bg-white/[0.06] p-2.5 text-[11px] opacity-80">
-                端数調整: {results.remainder} 人が +1 円で合計 ¥{results.totalFare.toLocaleString()} に一致
+                端数: {results.remainder} 人が +1 円 ({results.personCount - results.remainder}人 ¥{results.perPerson.toLocaleString()} / {results.remainder}人 ¥{(results.perPerson + 1).toLocaleString()})
               </div>
             )}
 
-            {/* segments モード: 1 人乗車中の数 + 単価 */}
             {results.mode === "segments" && (
               <div className="mt-3.5 flex items-center justify-between text-[11px] opacity-70">
                 <span>{results.totalPassengers}人乗車</span>
@@ -759,7 +655,7 @@ export function TaxiCalculator({
             )}
           </div>
 
-          {/* segments モード: 降りる順番タイムライン (デザインの「降りる順番」) */}
+          {/* segments モード: 降りる順番タイムライン */}
           {results.mode === "segments" && (
             <div className="wm-card p-4">
               <h3 className="wm-h3 mb-3 text-[14px] font-semibold">降りる順番</h3>
@@ -795,7 +691,7 @@ export function TaxiCalculator({
                       <button
                         type="button"
                         onClick={toggleExpand}
-                        className="block w-full rounded-[12px] border border-[var(--wm-line)] bg-card px-3 py-2.5 text-left transition hover:bg-[var(--wm-surface)]/50"
+                        className="block w-full rounded-[12px] border border-[var(--wm-line)] bg-card px-3 py-2.5 text-left transition active:bg-[var(--wm-surface)]/50"
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div className="min-w-0 flex-1">
@@ -873,6 +769,275 @@ export function TaxiCalculator({
           )}
         </>
       )}
+
+      {/* クイックオプション (距離モードのみ) */}
+      {isDistanceMode && (
+        <div className="wm-card p-3">
+          <button
+            type="button"
+            onClick={() => setNightSurcharge((v) => !v)}
+            className={`flex w-full items-center justify-between rounded-[12px] px-3 py-3 text-left transition ${
+              nightSurcharge ? "bg-[var(--wm-accent-soft)]" : "bg-transparent active:bg-[var(--wm-surface)]"
+            }`}
+            aria-pressed={nightSurcharge}
+          >
+            <span className="flex items-center gap-2">
+              <Moon className={`h-4 w-4 ${nightSurcharge ? "text-[var(--wm-accent-pressed)]" : "text-[var(--wm-ink-3)]"}`} />
+              <span className="text-[13.5px] font-semibold">深夜割増 +20%</span>
+              <span className="text-[11px] text-[var(--wm-ink-3)]">22:00–05:00</span>
+            </span>
+            <Switch checked={nightSurcharge} onCheckedChange={setNightSurcharge} />
+          </button>
+        </div>
+      )}
+
+      {/* 詳細設定 (折りたたみ) */}
+      <Collapsible open={showAdvanced} onOpenChange={setShowAdvanced}>
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between rounded-[14px] border border-[var(--wm-line)] bg-card px-4 py-3 text-left transition active:bg-[var(--wm-surface)]"
+          >
+            <span className="flex items-center gap-2 text-[13.5px] font-semibold text-[var(--wm-ink-2)]">
+              <Settings2 className="h-4 w-4" />
+              詳細設定
+              {mode === "total" && (
+                <span className="ml-1 text-[11px] font-normal text-[var(--wm-ink-3)]">(金額モードでは未使用)</span>
+              )}
+            </span>
+            <ChevronDown className={`h-4 w-4 text-[var(--wm-ink-3)] transition-transform ${showAdvanced ? "rotate-180" : ""}`} />
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="space-y-3 pt-3">
+          {/* 車種切替 */}
+          {isDistanceMode && (
+            <div className="wm-tabs">
+              <button
+                type="button"
+                className={`wm-tab ${vehicleType === "taxi" ? "is-active" : ""}`}
+                onClick={() => setVehicleType("taxi")}
+              >
+                <Car className="mr-1.5 inline-block h-3.5 w-3.5" />
+                タクシー
+              </button>
+              <button
+                type="button"
+                className={`wm-tab ${vehicleType === "daiko" ? "is-active" : ""}`}
+                onClick={() => setVehicleType("daiko")}
+              >
+                <Truck className="mr-1.5 inline-block h-3.5 w-3.5" />
+                運転代行
+              </button>
+            </div>
+          )}
+
+          {/* 料金設定 */}
+          {isDistanceMode && (
+            <div className="wm-card p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="wm-h3 text-[14px] font-semibold">料金設定</h3>
+                <span className="wm-meta">{vehicleType === "taxi" ? "タクシー" : "運転代行"}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">
+                    初乗り距離 (km)
+                  </Label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    className="wm-num mt-1"
+                    value={Number.isNaN(settings.baseKm) ? "" : settings.baseKm}
+                    onChange={(e) => updateSetting("baseKm", e.target.value, Number.parseFloat)}
+                  />
+                </div>
+                <div>
+                  <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">初乗り料金</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    className="wm-num mt-1"
+                    value={Number.isNaN(settings.basePrice) ? "" : settings.basePrice}
+                    onChange={(e) => updateSetting("basePrice", e.target.value, Number.parseInt)}
+                  />
+                </div>
+                <div>
+                  <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">
+                    加算単価 (/km)
+                  </Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    className="wm-num mt-1"
+                    value={Number.isNaN(settings.perKmPrice) ? "" : settings.perKmPrice}
+                    onChange={(e) => updateSetting("perKmPrice", e.target.value, Number.parseInt)}
+                  />
+                </div>
+                <div>
+                  <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">迎車料金</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    className="wm-num mt-1"
+                    value={Number.isNaN(settings.pickupFee) ? "" : settings.pickupFee}
+                    onChange={(e) => updateSetting("pickupFee", e.target.value, Number.parseInt)}
+                  />
+                </div>
+              </div>
+
+              <Collapsible open={showLongDistanceSettings} onOpenChange={setShowLongDistanceSettings}>
+                <CollapsibleTrigger asChild>
+                  <Button variant="ghost" size="sm" className="w-full justify-between text-[13px]">
+                    長距離割増設定
+                    <ChevronDown className={`h-4 w-4 transition-transform ${showLongDistanceSettings ? "rotate-180" : ""}`} />
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-2">
+                  <div className="grid grid-cols-2 gap-3 rounded-[12px] bg-[var(--wm-surface)] p-3">
+                    <div>
+                      <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">
+                        長距離閾値 (km)
+                      </Label>
+                      <Input
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        className="wm-num mt-1 bg-card"
+                        placeholder={vehicleType === "daiko" ? "10" : "未設定"}
+                        value={Number.isNaN(settings.extraFromKm ?? Number.NaN) ? "" : settings.extraFromKm}
+                        onChange={(e) => updateSetting("extraFromKm", e.target.value, Number.parseFloat)}
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">
+                        追加単価 (/km)
+                      </Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        className="wm-num mt-1 bg-card"
+                        placeholder={vehicleType === "daiko" ? "100" : "未設定"}
+                        value={Number.isNaN(settings.extraPerKm ?? Number.NaN) ? "" : settings.extraPerKm}
+                        onChange={(e) => updateSetting("extraPerKm", e.target.value, Number.parseInt)}
+                      />
+                    </div>
+                    <p className="col-span-2 text-[11px] text-[var(--wm-ink-3)]">
+                      閾値を超えた距離分に追加単価が上乗せされます
+                    </p>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+              {settingsInvalid && (
+                <p className="text-[12px] text-destructive">
+                  {(settings.baseKm === undefined || Number.isNaN(settings.baseKm) || settings.baseKm <= 0)
+                    ? "初乗り距離は0より大きい値を入力してください。"
+                    : hasLongDistance && settings.extraFromKm !== undefined && !Number.isNaN(settings.extraFromKm) && settings.extraFromKm < (settings.baseKm || 0)
+                    ? "長距離閾値は初乗り距離以上に設定してください。"
+                    : "0以上の値をすべて入力してください。"}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* カスタム割増・割引 */}
+          {isDistanceMode && (
+            <div className="wm-card p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="wm-h3 text-[14px] font-semibold">カスタム割増・割引</h3>
+                <Button variant="outline" size="sm" onClick={addModifier} className="bg-card">
+                  <Plus className="mr-1 h-4 w-4" />
+                  追加
+                </Button>
+              </div>
+              <div>
+                {modifiers.length === 0 ? (
+                  <p className="text-center text-[12px] text-[var(--wm-ink-3)] py-3">深夜割増以外を追加したいときに利用</p>
+                ) : (<>
+                  <p className="mb-2 text-[11px] text-[var(--wm-ink-3)]">※ % は基本運賃 (距離料金 + 迎車料金) に対して適用 (切り捨て)</p>
+                  <div className="space-y-3">
+                    {modifiers.map((mod) => (
+                      <div
+                        key={mod.id}
+                        className="grid grid-cols-1 gap-2 p-3 bg-muted/50 rounded sm:grid-cols-[auto,1fr,120px,110px,110px,auto] sm:items-center"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Switch checked={mod.enabled} onCheckedChange={(checked) => updateModifier(mod.id, { enabled: checked })} />
+                          <span className="text-xs text-muted-foreground hidden sm:inline">適用</span>
+                        </div>
+                        <Input
+                          placeholder="名称"
+                          className="h-10 sm:h-8 w-full"
+                          value={mod.name}
+                          onChange={(e) => updateModifier(mod.id, { name: e.target.value })}
+                        />
+                        <Input
+                          type="number"
+                          className="h-10 sm:h-8 w-full"
+                          value={Number.isNaN(mod.amount) ? "" : mod.amount}
+                          onChange={(e) =>
+                            updateModifier(mod.id, {
+                              amount: e.target.value === "" ? Number.NaN : Number.parseFloat(e.target.value),
+                            })
+                          }
+                        />
+                        <Select value={mod.type} onValueChange={(v) => updateModifier(mod.id, { type: v as "fixed" | "percent" })}>
+                          <SelectTrigger className="w-full sm:w-24 h-10 sm:h-8">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="fixed">円</SelectItem>
+                            <SelectItem value="percent">%</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Select
+                          value={mod.direction}
+                          onValueChange={(v) => updateModifier(mod.id, { direction: v as "add" | "subtract" })}
+                        >
+                          <SelectTrigger className="w-full sm:w-24 h-10 sm:h-8">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="add">加算</SelectItem>
+                            <SelectItem value="subtract">減算</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-10 w-10 sm:h-8 sm:w-8 text-destructive hover:text-destructive justify-self-start"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>オプションを削除しますか？</AlertDialogTitle>
+                              <AlertDialogDescription>この操作は取り消せません。</AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>キャンセル</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => removeModifier(mod.id)}>削除する</AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                    ))}
+                  </div>
+                </>)}
+              </div>
+            </div>
+          )}
+
+          {mode === "total" && (
+            <div className="wm-card p-4 text-[12px] text-[var(--wm-ink-2)]">
+              金額モードはメーター金額を直接入力するため、車種・料金設定・割増は使用されません。距離から運賃を推定したい場合は「距離」または「区間別」モードを選んでください。
+            </div>
+          )}
+        </CollapsibleContent>
+      </Collapsible>
     </div>
   )
 }

@@ -8,8 +8,134 @@ import { tableEvents } from "@/lib/events/table-events"
 
 // Round up to nearest 10 yen
 const roundUp10 = (n: number) => Math.ceil(n / 10) * 10
-// Round down to nearest 1000 yen (bills only)
-const roundDown1000 = (n: number) => Math.floor(n / 1000) * 1000
+
+const WEIGHT_MULTIPLIERS = {
+  less: 0.5,
+  normal: 1,
+  more: 1.5,
+} as const
+
+const FUN_ADJUSTMENT_TYPES = [
+  "none",
+  "remainder_roulette",
+  "lucky_discount",
+  "organizer_bonus",
+  "full_burden_roulette",
+] as const
+
+type FunAdjustmentType = typeof FUN_ADJUSTMENT_TYPES[number]
+
+type FunAdjustment = {
+  type: FunAdjustmentType
+  targetMemberId?: string
+  amount?: number
+}
+
+function normalizeExemptMemberId(value: unknown, memberIds: string[]) {
+  return typeof value === "string" && memberIds.includes(value) ? value : null
+}
+
+function normalizeFunAdjustment(value: unknown): FunAdjustment {
+  if (!value || typeof value !== "object") return { type: "none" }
+
+  const raw = value as Record<string, unknown>
+  const type = typeof raw.type === "string" && FUN_ADJUSTMENT_TYPES.includes(raw.type as FunAdjustmentType)
+    ? raw.type as FunAdjustmentType
+    : "none"
+
+  const targetMemberId = typeof raw.targetMemberId === "string" ? raw.targetMemberId : undefined
+  const rawAmount = typeof raw.amount === "number" && Number.isFinite(raw.amount) ? Math.floor(raw.amount) : undefined
+  const amount = rawAmount !== undefined && rawAmount > 0 ? Math.min(rawAmount, 10000) : undefined
+
+  if (type === "none") return { type: "none" }
+  return { type, targetMemberId, amount }
+}
+
+function distributeAmount(memberAmounts: Record<string, number>, memberIds: string[], amount: number) {
+  if (amount <= 0 || memberIds.length === 0) return
+
+  const base = Math.floor(amount / memberIds.length)
+  let remainder = amount - base * memberIds.length
+
+  for (const id of memberIds) {
+    memberAmounts[id] = (memberAmounts[id] || 0) + base + (remainder > 0 ? 1 : 0)
+    if (remainder > 0) remainder -= 1
+  }
+}
+
+function applyMemberDiscount(
+  memberAmounts: Record<string, number>,
+  memberIds: string[],
+  targetMemberId: string | undefined,
+  amount: number,
+) {
+  if (!targetMemberId || !memberIds.includes(targetMemberId)) return
+
+  const currentAmount = memberAmounts[targetMemberId] || 0
+  const discount = Math.min(amount, Math.max(0, currentAmount))
+  if (discount <= 0) return
+
+  const recipients = memberIds.filter((id) => id !== targetMemberId)
+  if (recipients.length === 0) return
+
+  memberAmounts[targetMemberId] = currentAmount - discount
+  distributeAmount(memberAmounts, recipients, discount)
+}
+
+function applyMemberExemption(
+  memberAmounts: Record<string, number>,
+  memberIds: string[],
+  exemptMemberId: string | null,
+) {
+  if (!exemptMemberId || !memberIds.includes(exemptMemberId)) return
+
+  const currentAmount = memberAmounts[exemptMemberId] || 0
+  if (currentAmount <= 0) {
+    memberAmounts[exemptMemberId] = 0
+    return
+  }
+
+  memberAmounts[exemptMemberId] = 0
+  distributeAmount(memberAmounts, memberIds.filter((id) => id !== exemptMemberId), currentAmount)
+}
+
+function applyFunAdjustment(
+  memberAmounts: Record<string, number>,
+  memberIds: string[],
+  funAdjustment: FunAdjustment,
+  exemptMemberId: string | null,
+) {
+  if (funAdjustment.type === "none") return
+  const eligibleMemberIds = memberIds.filter((id) => id !== exemptMemberId)
+  if (!funAdjustment.targetMemberId || !eligibleMemberIds.includes(funAdjustment.targetMemberId)) return
+
+  if (funAdjustment.type === "full_burden_roulette") {
+    const totalAmount = memberIds.reduce((sum, id) => sum + (memberAmounts[id] || 0), 0)
+    for (const id of memberIds) {
+      memberAmounts[id] = id === funAdjustment.targetMemberId ? totalAmount : 0
+    }
+    return
+  }
+
+  if (funAdjustment.type === "remainder_roulette") {
+    const unit = 100
+    let carriedAmount = 0
+
+    for (const id of eligibleMemberIds) {
+      if (id === funAdjustment.targetMemberId) continue
+      const currentAmount = memberAmounts[id] || 0
+      if (currentAmount <= 0) continue
+      const roundedAmount = Math.floor(currentAmount / unit) * unit
+      memberAmounts[id] = roundedAmount
+      carriedAmount += currentAmount - roundedAmount
+    }
+
+    memberAmounts[funAdjustment.targetMemberId] = (memberAmounts[funAdjustment.targetMemberId] || 0) + carriedAmount
+    return
+  }
+
+  applyMemberDiscount(memberAmounts, eligibleMemberIds, funAdjustment.targetMemberId, funAdjustment.amount || 500)
+}
 
 async function resolveUserId(request: Request): Promise<string | null> {
   const session = await auth()
@@ -42,6 +168,7 @@ export async function POST(request: Request) {
   const payerId = body?.payerId as string | undefined
   const splitMode = (body?.splitMode as string) || "equal"
   const memberWeights = (body?.memberWeights as Record<string, string>) || {}
+  const funAdjustment = normalizeFunAdjustment(body?.funAdjustment)
 
   if (!tableId) {
     return NextResponse.json({ error: "tableId is required" }, { status: 400 })
@@ -103,8 +230,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "会計者がメンバーに存在しません" }, { status: 400 })
   }
 
+  const memberIds = members.map((m) => m.id)
+  const exemptMemberId = normalizeExemptMemberId(body?.exemptMemberId, memberIds)
+  const effectiveFunAdjustment =
+    funAdjustment.targetMemberId && funAdjustment.targetMemberId === exemptMemberId ? { type: "none" as const } : funAdjustment
+
   // Save settings to table (shared across all members)
-  const settings = { payerId, splitMode, memberWeights }
+  const settings = { payerId, splitMode, memberWeights, exemptMemberId, funAdjustment: effectiveFunAdjustment }
   await db.update(tables).set({ settlementSettings: settings }).where(eq(tables.id, tableId))
 
   // Delete all existing payments for this table
@@ -116,50 +248,39 @@ export async function POST(request: Request) {
   const memberAmounts: Record<string, number> = {}
 
   if (splitMode === "weighted") {
-    // 少なめ = 1000円引き（お札で払える額）、多め = その分を負担
-    const normalAmount = roundUp10(totalAmount / members.length)
+    // UIの表記どおり、多め=1.5 / 普通=1.0 / 少なめ=0.5 の比率で配分する。
+    const totalWeight = members.reduce((sum, member) => {
+      const key = (memberWeights[member.id] || "normal") as keyof typeof WEIGHT_MULTIPLIERS
+      return sum + (WEIGHT_MULTIPLIERS[key] ?? WEIGHT_MULTIPLIERS.normal)
+    }, 0)
 
-    const lessMembers: string[] = []
-    const moreMembers: string[] = []
-    const normalMembers: string[] = []
-
-    for (const m of members) {
-      const weight = memberWeights[m.id] || "normal"
-      if (weight === "less") lessMembers.push(m.id)
-      else if (weight === "more") moreMembers.push(m.id)
-      else normalMembers.push(m.id)
-    }
-
-    // 少なめ: 普通の額から1000円引き（最低1000円）
-    const lessAmount = Math.max(roundDown1000(normalAmount - 1000), 1000)
-
-    // 普通メンバーの合計
-    for (const id of normalMembers) {
-      memberAmounts[id] = normalAmount
-    }
-    for (const id of lessMembers) {
-      memberAmounts[id] = lessAmount
-    }
-
-    const normalTotal = normalAmount * normalMembers.length
-    const lessTotal = lessAmount * lessMembers.length
-
-    // 多めメンバーが残りを負担
-    if (moreMembers.length > 0) {
-      const remaining = totalAmount - normalTotal - lessTotal
-      const perMore = roundUp10(remaining / moreMembers.length)
-
-      for (let i = 0; i < moreMembers.length - 1; i++) {
-        memberAmounts[moreMembers[i]] = perMore
+    const weightedMembers = members.map((m, index) => {
+      const weightKey = (memberWeights[m.id] || "normal") as keyof typeof WEIGHT_MULTIPLIERS
+      const multiplier = WEIGHT_MULTIPLIERS[weightKey] ?? WEIGHT_MULTIPLIERS.normal
+      return {
+        id: m.id,
+        index,
+        rawAmount: (totalAmount * multiplier) / totalWeight,
       }
-      // 最後の多めメンバーは端数調整
-      const othersMoreTotal = perMore * (moreMembers.length - 1)
-      memberAmounts[moreMembers[moreMembers.length - 1]] = remaining - othersMoreTotal
-    } else {
-      // 多めがいない場合は会計者が差額を負担
-      const currentTotal = normalTotal + lessTotal
-      const diff = totalAmount - currentTotal
-      memberAmounts[payerId] = (memberAmounts[payerId] || 0) + diff
+    })
+
+    let assignedTotal = 0
+    for (const memberShare of weightedMembers) {
+      const amount = Math.floor(memberShare.rawAmount)
+      memberAmounts[memberShare.id] = amount
+      assignedTotal += amount
+    }
+
+    let remainder = totalAmount - assignedTotal
+    const remainderOrder = [...weightedMembers].sort((a, b) => {
+      const fractionDiff = (b.rawAmount - Math.floor(b.rawAmount)) - (a.rawAmount - Math.floor(a.rawAmount))
+      return fractionDiff || a.index - b.index
+    })
+
+    for (const memberShare of remainderOrder) {
+      if (remainder <= 0) break
+      memberAmounts[memberShare.id] += 1
+      remainder -= 1
     }
   } else {
     // Equal split: round up to 10 yen, payer pays remainder
@@ -169,6 +290,9 @@ export async function POST(request: Request) {
     }
     memberAmounts[payerId] = totalAmount - (perPerson * otherMembers.length)
   }
+
+  applyMemberExemption(memberAmounts, memberIds, exemptMemberId)
+  applyFunAdjustment(memberAmounts, memberIds, effectiveFunAdjustment, exemptMemberId)
 
   const paymentValues = otherMembers
     .filter((m) => (memberAmounts[m.id] || 0) > 0)
@@ -244,7 +368,13 @@ export async function GET(request: Request) {
     .where(eq(tables.id, tableId))
     .limit(1)
 
-  const settings = (tableRow?.settlementSettings as { payerId?: string; splitMode?: string; memberWeights?: Record<string, string> }) || {}
+  const settings = (tableRow?.settlementSettings as {
+    payerId?: string
+    splitMode?: string
+    memberWeights?: Record<string, string>
+    exemptMemberId?: string | null
+    funAdjustment?: FunAdjustment
+  }) || {}
 
   const paymentsData = await db
     .select({

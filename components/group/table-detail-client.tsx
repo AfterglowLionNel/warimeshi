@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import type { Order, Table, TableMember, User } from "@/lib/types/group"
 import { useTableEvents } from "@/lib/hooks/use-table-events"
@@ -38,7 +38,6 @@ import {
   ArrowUpDown,
   Calendar,
   Car,
-  Calculator,
   Check,
   Copy,
   Crown,
@@ -50,6 +49,7 @@ import {
   Save,
   Search,
   Share2,
+  Sparkles,
   Trash2,
   Users,
   UserPlus,
@@ -145,8 +145,62 @@ type OrderInsert = {
   line_total: number
 }
 
+type FunAdjustmentType =
+  | "none"
+  | "remainder_roulette"
+  | "lucky_discount"
+  | "organizer_bonus"
+  | "full_burden_roulette"
+
+type FunAdjustment = {
+  type: FunAdjustmentType
+  targetMemberId?: string
+  amount?: number
+}
+
 const ITEMS_PER_PAGE = 10
 const MEMBER_COLORS = ["#e0f2fe", "#fef9c3", "#ede9fe", "#dcfce7", "#f1f5f9", "#ffe4e6", "#dbeafe", "#fee2e2"]
+const ROULETTE_ITEM_WIDTH = 128
+const ROULETTE_DURATION_MS = 7800
+const ROULETTE_LOOP_COUNT = 38
+
+function easeRoulette(progress: number) {
+  const decelStart = 0.48
+  const creepStart = 0.84
+  const fastDistance = 0.82
+  const creepDistance = 0.985
+
+  if (progress < decelStart) return (fastDistance / decelStart) * progress
+
+  if (progress < creepStart) {
+    const p = (progress - decelStart) / (creepStart - decelStart)
+    return fastDistance + (creepDistance - fastDistance) * (1 - Math.pow(1 - p, 2.2))
+  }
+
+  const p = (progress - creepStart) / (1 - creepStart)
+  return creepDistance + (1 - creepDistance) * (1 - Math.pow(1 - p, 3.8))
+}
+
+function normalizeFunAdjustment(value: unknown): FunAdjustment {
+  if (!value || typeof value !== "object") return { type: "none" }
+
+  const raw = value as Partial<FunAdjustment>
+  const validTypes: FunAdjustmentType[] = [
+    "none",
+    "remainder_roulette",
+    "lucky_discount",
+    "organizer_bonus",
+    "full_burden_roulette",
+  ]
+  const type = raw.type && validTypes.includes(raw.type) ? raw.type : "none"
+  if (type === "none") return { type: "none" }
+
+  return {
+    type,
+    targetMemberId: typeof raw.targetMemberId === "string" ? raw.targetMemberId : undefined,
+    amount: typeof raw.amount === "number" && Number.isFinite(raw.amount) ? raw.amount : undefined,
+  }
+}
 
 // Helper to map API response (camelCase) to component format (snake_case)
 function mapMemberFromApi(m: ApiTableMember): TableMember & { user?: User } {
@@ -248,6 +302,19 @@ export function TableDetailClient({
   const [payerId, setPayerId] = useState<string>(currentMembership.id)
   const [splitMode, setSplitMode] = useState<"equal" | "weighted">("equal")
   const [memberWeights, setMemberWeights] = useState<Record<string, "more" | "normal" | "less">>({})
+  const [exemptMemberId, setExemptMemberId] = useState<string | null>(null)
+  const [showFunAdjustments, setShowFunAdjustments] = useState(false)
+  const [funAdjustment, setFunAdjustment] = useState<FunAdjustment>({ type: "none" })
+  const [spinningAdjustmentType, setSpinningAdjustmentType] = useState<
+    "remainder_roulette" | "lucky_discount" | "full_burden_roulette" | null
+  >(null)
+  const [roulettePreviewMemberId, setRoulettePreviewMemberId] = useState<string | null>(null)
+  const [roulettePreviewSlotIndex, setRoulettePreviewSlotIndex] = useState<number | null>(null)
+  const [rouletteOffset, setRouletteOffset] = useState(ROULETTE_ITEM_WIDTH / 2)
+  const [rouletteConfettiBurst, setRouletteConfettiBurst] = useState(false)
+  const rouletteFrameRef = useRef<number | null>(null)
+  const rouletteFinishTimeoutRef = useRef<number | null>(null)
+  const rouletteConfettiTimeoutRef = useRef<number | null>(null)
 
   // Guest member state
   const [showGuestForm, setShowGuestForm] = useState(false)
@@ -274,6 +341,8 @@ export function TableDetailClient({
             if (json.settings.payerId) setPayerId(json.settings.payerId)
             if (json.settings.splitMode) setSplitMode(json.settings.splitMode as "equal" | "weighted")
             if (json.settings.memberWeights) setMemberWeights(json.settings.memberWeights)
+            setExemptMemberId(typeof json.settings.exemptMemberId === "string" ? json.settings.exemptMemberId : null)
+            if (json.settings.funAdjustment) setFunAdjustment(normalizeFunAdjustment(json.settings.funAdjustment))
           }
         }
       } catch {
@@ -332,6 +401,35 @@ export function TableDetailClient({
   useEffect(() => {
     fetchUpdates()
   }, [fetchUpdates])
+
+  useEffect(() => {
+    setFunAdjustment((prev) => {
+      const eligibleMembers = members.filter((member) => member.id !== exemptMemberId)
+      if (
+        (prev.type === "remainder_roulette" || prev.type === "lucky_discount") &&
+        eligibleMembers.length < 2
+      ) {
+        return { type: "none" }
+      }
+      if (prev.type === "organizer_bonus" && prev.targetMemberId !== payerId) {
+        return { ...prev, targetMemberId: payerId, amount: prev.amount || 500 }
+      }
+      if (
+        prev.type !== "none" &&
+        prev.targetMemberId &&
+        (!members.some((m) => m.id === prev.targetMemberId) || prev.targetMemberId === exemptMemberId)
+      ) {
+        return { type: "none" }
+      }
+      return prev
+    })
+  }, [members, payerId, exemptMemberId])
+
+  useEffect(() => {
+    if (exemptMemberId && !members.some((m) => m.id === exemptMemberId)) {
+      setExemptMemberId(null)
+    }
+  }, [exemptMemberId, members])
 
   const handleCopyLink = async () => {
     const link = `${window.location.origin}/group/join/${table.invite_token}`
@@ -799,6 +897,137 @@ export function TableDetailClient({
     return { totalQuantity, totalAmount, byMember }
   }, [orders, members])
 
+  const rouletteCandidates = useMemo(
+    () => members.filter((member) => member.id !== exemptMemberId),
+    [members, exemptMemberId],
+  )
+
+  const runRandomFunAdjustment = (type: "remainder_roulette" | "lucky_discount" | "full_burden_roulette") => {
+    if (rouletteCandidates.length === 0 || spinningAdjustmentType) return
+
+    if (rouletteFrameRef.current !== null) {
+      window.cancelAnimationFrame(rouletteFrameRef.current)
+      rouletteFrameRef.current = null
+    }
+    if (rouletteFinishTimeoutRef.current !== null) {
+      window.clearTimeout(rouletteFinishTimeoutRef.current)
+      rouletteFinishTimeoutRef.current = null
+    }
+    if (rouletteConfettiTimeoutRef.current !== null) {
+      window.clearTimeout(rouletteConfettiTimeoutRef.current)
+      rouletteConfettiTimeoutRef.current = null
+    }
+
+    const targetIndex = Math.floor(Math.random() * rouletteCandidates.length)
+    const targetMember = rouletteCandidates[targetIndex]
+    if (!targetMember) return
+
+    const startOffset = ROULETTE_ITEM_WIDTH / 2
+    const targetLoop = Math.max(4, ROULETTE_LOOP_COUNT - 2)
+    const targetSlotIndex = targetLoop * rouletteCandidates.length + targetIndex
+    const endOffset = targetSlotIndex * ROULETTE_ITEM_WIDTH + ROULETTE_ITEM_WIDTH / 2
+    let startedAt: number | null = null
+
+    setSpinningAdjustmentType(type)
+    setRouletteOffset(startOffset)
+    setRouletteConfettiBurst(false)
+    setRoulettePreviewMemberId(rouletteCandidates[0]?.id ?? null)
+    setRoulettePreviewSlotIndex(0)
+
+    const animate = (timestamp: number) => {
+      if (startedAt === null) startedAt = timestamp
+      const progress = Math.min(1, (timestamp - startedAt) / ROULETTE_DURATION_MS)
+      const easedProgress = easeRoulette(progress)
+      const nextOffset = startOffset + (endOffset - startOffset) * easedProgress
+      const centeredSlotIndex = Math.max(0, Math.round((nextOffset - ROULETTE_ITEM_WIDTH / 2) / ROULETTE_ITEM_WIDTH))
+      const previewMember = rouletteCandidates[centeredSlotIndex % rouletteCandidates.length]
+
+      setRouletteOffset(nextOffset)
+      setRoulettePreviewSlotIndex(centeredSlotIndex)
+      if (previewMember) setRoulettePreviewMemberId(previewMember.id)
+
+      if (progress < 1) {
+        rouletteFrameRef.current = window.requestAnimationFrame(animate)
+      } else {
+        setRouletteOffset(endOffset)
+        setRoulettePreviewMemberId(targetMember.id)
+        setRoulettePreviewSlotIndex(targetSlotIndex)
+        setFunAdjustment({
+          type,
+          targetMemberId: targetMember.id,
+          amount: type === "lucky_discount" ? 500 : undefined,
+        })
+        rouletteFrameRef.current = null
+        rouletteFinishTimeoutRef.current = window.setTimeout(() => {
+          setRoulettePreviewMemberId(null)
+          setRoulettePreviewSlotIndex(null)
+          setSpinningAdjustmentType(null)
+          setRouletteConfettiBurst(true)
+          rouletteFinishTimeoutRef.current = null
+          rouletteConfettiTimeoutRef.current = window.setTimeout(() => {
+            setRouletteConfettiBurst(false)
+            rouletteConfettiTimeoutRef.current = null
+          }, 1900)
+        }, 900)
+      }
+    }
+
+    rouletteFrameRef.current = window.requestAnimationFrame(animate)
+  }
+
+  useEffect(() => {
+    return () => {
+      if (rouletteFrameRef.current !== null) {
+        window.cancelAnimationFrame(rouletteFrameRef.current)
+      }
+      if (rouletteFinishTimeoutRef.current !== null) {
+        window.clearTimeout(rouletteFinishTimeoutRef.current)
+      }
+      if (rouletteConfettiTimeoutRef.current !== null) {
+        window.clearTimeout(rouletteConfettiTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  const selectedFunTarget = members.find((m) => m.id === funAdjustment.targetMemberId)
+  const selectedExemptMember = members.find((m) => m.id === exemptMemberId)
+  const roulettePreviewMember = members.find((m) => m.id === roulettePreviewMemberId)
+  const rouletteMembers = useMemo(() => {
+    if (rouletteCandidates.length === 0) return []
+    return Array.from({ length: ROULETTE_LOOP_COUNT }, () => rouletteCandidates).flat()
+  }, [rouletteCandidates])
+  const funAdjustmentSummary = (() => {
+    if (funAdjustment.type === "none" || !selectedFunTarget) return null
+    if (funAdjustment.type === "remainder_roulette") {
+      return `${selectedFunTarget.display_name} が100円未満の端数を担当`
+    }
+    if (funAdjustment.type === "lucky_discount") {
+      return `${selectedFunTarget.display_name} が500円引き`
+    }
+    if (funAdjustment.type === "full_burden_roulette") {
+      return `${selectedFunTarget.display_name} が全額担当`
+    }
+    return `${selectedFunTarget.display_name} が500円引き`
+  })()
+
+  const funAdjustmentResultLabel = (() => {
+    if (funAdjustment.type === "remainder_roulette") return "が100円未満の端数を担当"
+    if (funAdjustment.type === "lucky_discount") return "が500円引き"
+    if (funAdjustment.type === "organizer_bonus") return "が500円引き"
+    if (funAdjustment.type === "full_burden_roulette") return "が全額担当"
+    return ""
+  })()
+
+  const spinningAdjustmentLabel = (() => {
+    if (spinningAdjustmentType === "remainder_roulette") return "端数だけルーレット"
+    if (spinningAdjustmentType === "lucky_discount") return "1人だけ500円引き"
+    if (spinningAdjustmentType === "full_burden_roulette") return "全額負担ルーレット"
+    return ""
+  })()
+
+  const exemptionSummary = selectedExemptMember ? `${selectedExemptMember.display_name} は支払い0円` : null
+  const settlementAdjustmentSummary = [exemptionSummary, funAdjustmentSummary].filter(Boolean).join(" / ") || null
+
   // Auto-calculate when settings change
   useEffect(() => {
     if (!settingsLoaded || totals.totalAmount === 0 || members.length < 2) return
@@ -809,7 +1038,7 @@ export function TableDetailClient({
         const res = await fetch("/api/payments", {
           method: "POST",
           headers: { "Content-Type": "application/json", ...getApiHeaders() },
-          body: JSON.stringify({ tableId: table.id, payerId, splitMode, memberWeights }),
+          body: JSON.stringify({ tableId: table.id, payerId, splitMode, memberWeights, exemptMemberId, funAdjustment }),
           signal: controller.signal,
         })
 
@@ -823,7 +1052,7 @@ export function TableDetailClient({
     calculate()
     return () => controller.abort()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settingsLoaded, payerId, splitMode, memberWeights, totals.totalAmount, members.length])
+  }, [settingsLoaded, payerId, splitMode, memberWeights, exemptMemberId, funAdjustment, totals.totalAmount, members.length])
 
   return (
     <main className="min-h-screen bg-background pb-4">
@@ -1053,13 +1282,15 @@ export function TableDetailClient({
         <section>
           <div className="mb-2.5 flex items-center justify-between">
             <h2 className="wm-h3 text-[14px] font-semibold">最近の注文</h2>
-            <button
-              type="button"
-              onClick={() => setShowAllOrders((v) => !v)}
-              className="text-[12px] text-[var(--wm-ink-3)] hover:text-foreground"
-            >
-              {showAllOrders ? "閉じる ‹" : "すべて見る ›"}
-            </button>
+            {orders.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowAllOrders(true)}
+                className="text-[12px] text-[var(--wm-ink-3)] hover:text-foreground"
+              >
+                すべて見る ›
+              </button>
+            )}
           </div>
           {orders.length === 0 ? (
             <div className="rounded-[14px] border border-dashed border-[var(--wm-line-strong)] bg-[var(--wm-surface)]/40 px-4 py-8 text-center">
@@ -1124,14 +1355,26 @@ export function TableDetailClient({
           )}
         </section>
 
-        {/* 全注文 (詳細表) — 「すべて見る」で展開 */}
-        {showAllOrders && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">注文一覧</CardTitle>
+        {/* 全注文 (詳細表) — 「すべて見る」でポップアップ表示 */}
+        <Dialog
+          open={showAllOrders}
+          onOpenChange={(open) => {
+            setShowAllOrders(open)
+            if (!open) {
+              cancelEdit()
+              cancelGroupEdit()
+            }
+          }}
+        >
+          <DialogContent className="flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-4xl flex-col overflow-hidden p-0 sm:max-h-[calc(100dvh-3rem)] sm:w-full">
+            <DialogHeader className="border-b px-4 py-4 pr-12 text-left sm:px-6 sm:pr-14">
+              <DialogTitle>注文一覧</DialogTitle>
+              <DialogDescription>
+                表示{displayOrders.length}件 / 注文{orders.length}件 / 合計{formatCurrency(totals.totalAmount)}
+              </DialogDescription>
 
-            <div className="space-y-2 mt-2">
-              <div className="flex items-center gap-2">
+              <div className="space-y-2 pt-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <Select
                   value={filterMember}
                   onValueChange={(v) => {
@@ -1139,7 +1382,7 @@ export function TableDetailClient({
                     setCurrentPage(1)
                   }}
                 >
-                  <SelectTrigger className="w-32">
+                  <SelectTrigger className="w-full sm:w-32">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -1164,7 +1407,7 @@ export function TableDetailClient({
                   />
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-muted-foreground">並び替え</span>
                 <Select
                   value={sortField}
@@ -1194,8 +1437,8 @@ export function TableDetailClient({
                 </Button>
               </div>
             </div>
-          </CardHeader>
-          <CardContent>
+            </DialogHeader>
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-3 sm:px-6">
             {paginatedDisplayOrders.length === 0 ? (
               <p className="text-center text-muted-foreground py-8">
                 {searchQuery || filterMember !== "__all__" ? "該当する注文はありません" : "注文はありません"}
@@ -1671,72 +1914,9 @@ export function TableDetailClient({
                 )}
               </>
             )}
-          </CardContent>
-        </Card>
-        )}
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Calculator className="h-4 w-4" />
-              サマリー
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* 合計と進捗バーは画面上部の黒地カードに移動済み。
-                ここはメンバー別の内訳のみ表示する。 */}
-            <div>
-              <div className="mb-3 flex items-center justify-between">
-                <h4 className="font-medium">メンバー別内訳</h4>
-                <span className="wm-meta">合計 {formatCurrency(totals.totalAmount)} / {totals.totalQuantity}点</span>
-              </div>
-              <div className="space-y-2">
-                {totals.byMember.map(({ member, quantity, amount }) => (
-                  <AlertDialog key={member.id}>
-                    <AlertDialogTrigger asChild>
-                      <button
-                        type="button"
-                        className="w-full flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 rounded text-left border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
-                        style={{ backgroundColor: memberColorMap[member.id] || undefined }}
-                      >
-                        <span className="font-semibold leading-tight break-words">{member.display_name}</span>
-                        <div className="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto">
-                          <span className="text-xs text-muted-foreground sm:hidden">タップで詳細</span>
-                          <div className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground">
-                            <span>商品点数</span>
-                            <span className="font-semibold text-foreground">{quantity}点</span>
-                          </div>
-                          <span className="font-bold text-right text-base sm:text-lg min-w-[90px]">
-                            {formatCurrency(amount)}
-                          </span>
-                        </div>
-                      </button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>{member.display_name}</AlertDialogTitle>
-                        <AlertDialogDescription>メンバー別内訳</AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <div className="space-y-3 py-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm text-muted-foreground">商品点数</span>
-                          <span className="font-medium">{quantity}点</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm text-muted-foreground">合計金額</span>
-                          <span className="font-bold text-xl">{formatCurrency(amount)}</span>
-                        </div>
-                      </div>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>閉じる</AlertDialogCancel>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                ))}
-              </div>
             </div>
-          </CardContent>
-        </Card>
+          </DialogContent>
+        </Dialog>
 
         <Card>
           <CardHeader className="pb-3">
@@ -1822,15 +2002,244 @@ export function TableDetailClient({
                 <p className="text-xs text-muted-foreground">多め×1.5 / 普通×1.0 / 少なめ×0.5</p>
               </div>
             )}
+
+            <div className="rounded-lg border bg-background p-3">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <Label className="text-sm font-semibold">支払い0円にする人</Label>
+                  <Badge variant="outline" className="text-[10px]">任意</Badge>
+                </div>
+                <Select
+                  value={exemptMemberId ?? "__none__"}
+                  onValueChange={(value) => setExemptMemberId(value === "__none__" ? null : value)}
+                >
+                  <SelectTrigger className="h-10">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">指定しない</SelectItem>
+                    {members.map((member) => (
+                      <SelectItem key={member.id} value={member.id}>
+                        {member.display_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  選んだ人の負担額を0円にして、残りのメンバーで再配分します。
+                </p>
+                {selectedExemptMember && (
+                  <div className="flex flex-wrap items-center gap-1.5 rounded-md bg-muted px-3 py-2 text-sm font-medium">
+                    <span
+                      className="rounded-full px-2 py-0.5 text-xs font-bold"
+                      style={{ backgroundColor: memberColorMap[selectedExemptMember.id] || "var(--wm-surface)" }}
+                    >
+                      {selectedExemptMember.display_name}
+                    </span>
+                    <span>は支払い0円</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-lg border bg-muted/30 p-3">
+              <button
+                type="button"
+                onClick={() => setShowFunAdjustments((v) => !v)}
+                className="flex w-full flex-col items-stretch gap-2 text-left sm:flex-row sm:items-center sm:justify-between sm:gap-3"
+              >
+                <span className="flex items-center gap-2 text-sm font-semibold">
+                  <Radio className="h-4 w-4 text-primary" />
+                  お楽しみ調整
+                  <Badge variant="secondary" className="text-[10px]">任意</Badge>
+                </span>
+                <span className="text-xs leading-relaxed text-muted-foreground sm:text-right">
+                  {showFunAdjustments ? "閉じる" : funAdjustmentSummary || "追加する"}
+                </span>
+              </button>
+
+              {showFunAdjustments && (
+                <div className="mt-3 space-y-3">
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                    <button
+                      type="button"
+                      disabled={spinningAdjustmentType !== null || rouletteCandidates.length < 2}
+                      onClick={() => runRandomFunAdjustment("remainder_roulette")}
+                      className={`rounded-md border bg-background p-3 text-left transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60 ${
+                        funAdjustment.type === "remainder_roulette" ? "border-primary ring-1 ring-primary" : "border-border"
+                      }`}
+                    >
+                      <span className="block text-sm font-semibold">端数だけルーレット</span>
+                      <span className="mt-1 block text-xs text-muted-foreground">100円未満を1人に寄せる</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={spinningAdjustmentType !== null || rouletteCandidates.length < 2}
+                      onClick={() => runRandomFunAdjustment("lucky_discount")}
+                      className={`rounded-md border bg-background p-3 text-left transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60 ${
+                        funAdjustment.type === "lucky_discount" ? "border-primary ring-1 ring-primary" : "border-border"
+                      }`}
+                    >
+                      <span className="block text-sm font-semibold">1人だけ500円引き</span>
+                      <span className="mt-1 block text-xs text-muted-foreground">ランダムでラッキー割</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={spinningAdjustmentType !== null || rouletteCandidates.length === 0}
+                      onClick={() => runRandomFunAdjustment("full_burden_roulette")}
+                      className={`rounded-md border bg-background p-3 text-left transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60 ${
+                        funAdjustment.type === "full_burden_roulette" ? "border-primary ring-1 ring-primary" : "border-border"
+                      }`}
+                    >
+                      <span className="block text-sm font-semibold">全額負担ルーレット</span>
+                      <span className="mt-1 block text-xs text-muted-foreground">止まった人が全額担当</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={
+                        spinningAdjustmentType !== null ||
+                        payerId === exemptMemberId ||
+                        !rouletteCandidates.some((member) => member.id !== payerId)
+                      }
+                      onClick={() => setFunAdjustment({ type: "organizer_bonus", targetMemberId: payerId, amount: 500 })}
+                      className={`rounded-md border bg-background p-3 text-left transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60 ${
+                        funAdjustment.type === "organizer_bonus" ? "border-primary ring-1 ring-primary" : "border-border"
+                      }`}
+                    >
+                      <span className="block text-sm font-semibold">会計する人500円引き</span>
+                      <span className="mt-1 block text-xs text-muted-foreground">会計する人を少し安く</span>
+                    </button>
+                  </div>
+                  {selectedExemptMember && (
+                    <p className="text-xs text-muted-foreground">支払い0円の人はルーレット候補から外れます。</p>
+                  )}
+
+                  <div className="flex justify-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="bg-background"
+                      disabled={funAdjustment.type === "none" || spinningAdjustmentType !== null}
+                      onClick={() => setFunAdjustment({ type: "none" })}
+                    >
+                      <X className="mr-1 h-4 w-4" />
+                      解除
+                    </Button>
+                  </div>
+
+                  {spinningAdjustmentType && rouletteMembers.length > 0 && (
+                    <div className="wm-roulette-stage space-y-3 rounded-lg p-3" aria-live="polite">
+                      <div className="relative z-10 flex items-center justify-between gap-2 text-sm">
+                        <span className="inline-flex items-center gap-1.5 font-semibold text-white">
+                          <Sparkles className="h-4 w-4 text-[#F2C14E]" />
+                          {spinningAdjustmentLabel}
+                        </span>
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          {roulettePreviewMember && (
+                            <span className="hidden max-w-[8rem] truncate rounded-full border border-white/15 bg-white/10 px-2 py-1 text-[11px] font-bold text-white/80 sm:inline-flex">
+                              {roulettePreviewMember.display_name}
+                            </span>
+                          )}
+                          <span className="rounded-full border border-white/15 bg-white/10 px-2 py-1 text-[11px] font-bold text-white/80">
+                            抽選中
+                          </span>
+                        </div>
+                      </div>
+                      <div className="wm-roulette-window relative z-10 overflow-hidden rounded-lg py-8">
+                        <div className="wm-roulette-marker pointer-events-none absolute bottom-1 left-1/2 z-30 -translate-x-1/2 text-[24px] leading-none">
+                          ▲
+                        </div>
+                        <div className="pointer-events-none absolute inset-y-3 left-1/2 z-20 w-[3px] -translate-x-1/2 rounded-full bg-[#F2C14E]" />
+                        <div
+                          className="flex will-change-transform"
+                          style={{ transform: `translateX(calc(50% - ${rouletteOffset}px))` }}
+                        >
+                          {rouletteMembers.map((member, index) => {
+                            const isPreview = roulettePreviewSlotIndex === index
+                            return (
+                              <span
+                                key={`${member.id}-${index}`}
+                                className={`wm-roulette-item mx-1 flex h-14 w-[120px] shrink-0 items-center justify-center truncate rounded-full border px-3 text-center text-xs font-black shadow-sm transition-transform duration-75 ${
+                                  isPreview ? "is-active border-[#F2C14E] text-foreground" : "border-white/30 text-foreground"
+                                }`}
+                                style={{ backgroundColor: memberColorMap[member.id] || "var(--wm-card)" }}
+                              >
+                                {member.display_name}
+                              </span>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {!spinningAdjustmentType && funAdjustmentSummary && (
+                    <div className="wm-roulette-result relative flex flex-col gap-2 overflow-hidden rounded-lg bg-background px-3 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                      {rouletteConfettiBurst && (
+                        <div className="wm-roulette-confetti" aria-hidden="true">
+                          {Array.from({ length: 22 }).map((_, index) => (
+                            <span
+                              key={index}
+                              style={{
+                                left: `${4 + ((index * 17) % 92)}%`,
+                                animationDelay: `${(index % 7) * 0.06}s`,
+                                backgroundColor: ["#F2C14E", "#E56B4D", "#78A161", "#6F8AAA"][index % 4],
+                              }}
+                            />
+                          ))}
+                        </div>
+                      )}
+                      <span className="relative z-10 flex min-w-0 flex-wrap items-center gap-1.5 font-medium">
+                        <Sparkles className="h-4 w-4 shrink-0 text-primary" />
+                        {selectedFunTarget && (
+                          <span
+                            className="max-w-full rounded-full px-2.5 py-1 text-xs font-black text-foreground sm:max-w-[9rem] sm:truncate"
+                            style={{ backgroundColor: memberColorMap[selectedFunTarget.id] || "var(--wm-surface)" }}
+                          >
+                            {selectedFunTarget.display_name}
+                          </span>
+                        )}
+                        <span className="min-w-0 leading-relaxed">{funAdjustmentResultLabel}</span>
+                      </span>
+                      {(funAdjustment.type === "remainder_roulette" ||
+                        funAdjustment.type === "lucky_discount" ||
+                        funAdjustment.type === "full_burden_roulette") && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="relative z-10 h-8 shrink-0"
+                          onClick={() => {
+                            if (
+                              funAdjustment.type === "remainder_roulette" ||
+                              funAdjustment.type === "lucky_discount" ||
+                              funAdjustment.type === "full_burden_roulette"
+                            ) {
+                              runRandomFunAdjustment(funAdjustment.type)
+                            }
+                          }}
+                        >
+                          やり直す
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
 
         <PaymentTracker
           tableId={table.id}
           tableName={table.name}
+          eventDate={table.event_date}
           refreshTrigger={paymentRefresh}
           currentMemberId={currentMembership.id}
           memberColorMap={memberColorMap}
+          members={members}
+          orders={orders}
+          adjustmentSummary={settlementAdjustmentSummary}
         />
       </div>
 

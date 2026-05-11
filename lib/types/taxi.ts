@@ -25,4 +25,4 @@ export interface Segment {
   dropCount: number  // この区間で降りる人数
 }
 
-export type CalculationMode = "same" | "segments"
+export type CalculationMode = "total" | "same" | "segments"

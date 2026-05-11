@@ -254,3 +254,166 @@
 .wm-safe-bottom {
   padding-bottom: calc(12px + env(safe-area-inset-bottom));
 }
+
+.wm-roulette-stage {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0)),
+    #181713;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+    0 12px 28px rgba(20, 18, 12, 0.18);
+}
+
+.wm-roulette-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 5px;
+  background: repeating-linear-gradient(
+    90deg,
+    #f2c14e 0 10px,
+    rgba(255, 255, 255, 0.28) 10px 14px,
+    transparent 14px 26px
+  );
+  opacity: 0.92;
+  animation: wm-roulette-lights 0.65s linear infinite;
+}
+
+.wm-roulette-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    110deg,
+    transparent 0%,
+    transparent 42%,
+    rgba(242, 193, 78, 0.22) 48%,
+    rgba(255, 255, 255, 0.28) 50%,
+    rgba(242, 193, 78, 0.18) 52%,
+    transparent 58%,
+    transparent 100%
+  );
+  transform: translateX(-130%);
+  animation: wm-roulette-sweep 1.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.wm-roulette-window {
+  background:
+    linear-gradient(90deg, rgba(0, 0, 0, 0.34), transparent 18%, transparent 82%, rgba(0, 0, 0, 0.34)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 0 22px rgba(0, 0, 0, 0.28);
+}
+
+.wm-roulette-marker {
+  color: #f2c14e;
+  text-shadow: 0 0 12px rgba(242, 193, 78, 0.9);
+  animation: wm-roulette-marker 0.58s ease-in-out infinite;
+}
+
+.wm-roulette-item {
+  box-shadow: 0 4px 12px rgba(20, 18, 12, 0.28);
+  filter: saturate(0.92);
+}
+
+.wm-roulette-item.is-active {
+  transform: scale(1.16);
+  filter: saturate(1.15);
+  box-shadow:
+    0 0 0 3px rgba(242, 193, 78, 0.34),
+    0 10px 26px rgba(0, 0, 0, 0.28);
+}
+
+.wm-roulette-result {
+  border: 1px dashed rgba(200, 85, 61, 0.45);
+  box-shadow: 0 8px 18px rgba(200, 85, 61, 0.12);
+  animation: wm-roulette-result-pop 0.56s cubic-bezier(0.2, 1.25, 0.2, 1);
+}
+
+.wm-roulette-confetti {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.wm-roulette-confetti span {
+  position: absolute;
+  top: -12px;
+  width: 6px;
+  height: 11px;
+  border-radius: 2px;
+  opacity: 0;
+  animation: wm-roulette-confetti 1.55s ease-out both;
+}
+
+@keyframes wm-roulette-lights {
+  from {
+    background-position-x: 0;
+  }
+  to {
+    background-position-x: 26px;
+  }
+}
+
+@keyframes wm-roulette-sweep {
+  0% {
+    transform: translateX(-130%);
+  }
+  62%,
+  100% {
+    transform: translateX(130%);
+  }
+}
+
+@keyframes wm-roulette-marker {
+  0%,
+  100% {
+    transform: translateX(-50%) scale(1);
+  }
+  50% {
+    transform: translateX(-50%) scale(1.16);
+  }
+}
+
+@keyframes wm-roulette-result-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  70% {
+    opacity: 1;
+    transform: translateY(0) scale(1.02);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes wm-roulette-confetti {
+  0% {
+    opacity: 0;
+    transform: translateY(-8px) rotate(0deg);
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(170px) rotate(250deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wm-roulette-stage::before,
+  .wm-roulette-stage::after,
+  .wm-roulette-marker,
+  .wm-roulette-result,
+  .wm-roulette-confetti span {
+    animation: none;
+  }
+}

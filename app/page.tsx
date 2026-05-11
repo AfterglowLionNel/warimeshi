@@ -122,8 +122,8 @@ const HOME_FAQ_ITEMS = [
 ] as const
 
 export const metadata: Metadata = {
-  title: "割り勘計算アプリ | 飲み会・旅行の精算を簡単に",
-  description: "飲み会や旅行の割り勘計算を簡単にするアプリ。注文別の金額管理、グループ共有、タクシー料金の割り勘に対応。ログイン不要で今すぐ使える無料の割り勘計算ツール。",
+  title: "割り勘計算アプリ【無料】| 飲み会・タクシー・旅行の精算",
+  description: "飲み会・タクシー・旅行の割り勘計算が無料でできるアプリ。注文別の金額管理、グループ共有、タクシー料金 (途中下車対応) の割り勘に対応。ログイン不要で今すぐ使える割り勘ツール。",
   alternates: {
     canonical: "https://warimeshi.com",
   },

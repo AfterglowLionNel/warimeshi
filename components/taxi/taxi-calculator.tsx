@@ -946,13 +946,26 @@ export function TaxiCalculator({
               nightSurcharge ? "bg-[var(--wm-accent-soft)]" : "bg-transparent active:bg-[var(--wm-surface)]"
             }`}
             aria-pressed={nightSurcharge}
+            aria-label="深夜割増を切り替え"
           >
             <span className="flex items-center gap-2">
               <Moon className={`h-4 w-4 ${nightSurcharge ? "text-[var(--wm-accent-pressed)]" : "text-[var(--wm-ink-3)]"}`} />
               <span className="text-[13.5px] font-semibold">深夜割増 +20%</span>
               <span className="text-[11px] text-[var(--wm-ink-3)]">22:00–05:00</span>
             </span>
-            <Switch checked={nightSurcharge} onCheckedChange={setNightSurcharge} />
+            {/* 視覚的なスイッチ (button ではない div - 親 button との二重発火防止) */}
+            <span
+              aria-hidden="true"
+              className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                nightSurcharge ? "bg-[var(--wm-accent)]" : "bg-[var(--wm-line-strong)]"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                  nightSurcharge ? "translate-x-[18px]" : "translate-x-0.5"
+                }`}
+              />
+            </span>
           </button>
         </div>
       )}

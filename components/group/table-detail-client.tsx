@@ -35,6 +35,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table as UITable, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import {
   ArrowLeft,
+  ArrowRight,
   ArrowUpDown,
   Calendar,
   Car,
@@ -279,6 +280,22 @@ export function TableDetailClient({
     item_name: string
     total_amount: string
   } | null>(null)
+
+  // View toggle (orders / checkout) — hash-based for back button support
+  const [view, setView] = useState<"orders" | "checkout">("orders")
+  useEffect(() => {
+    const sync = () => setView(window.location.hash === "#checkout" ? "checkout" : "orders")
+    sync()
+    window.addEventListener("hashchange", sync)
+    return () => window.removeEventListener("hashchange", sync)
+  }, [])
+  const goToView = useCallback((next: "orders" | "checkout") => {
+    if (typeof window === "undefined") return
+    const newHash = next === "checkout" ? "#checkout" : ""
+    window.history.pushState(null, "", window.location.pathname + window.location.search + newHash)
+    setView(next)
+    window.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior })
+  }, [])
 
   // Settlement state
   const [payerId, setPayerId] = useState<string>(currentMembership.id)
@@ -1064,6 +1081,7 @@ export function TableDetailClient({
           </div>
         </div>
 
+        {view === "orders" && (<>
         {/* メンバー横スクロール */}
         <section>
           <div className="mb-2.5 flex items-center justify-between">
@@ -1836,6 +1854,46 @@ export function TableDetailClient({
           </DialogContent>
         </Dialog>
 
+        {/* お会計に進む CTA (orders view のみ) */}
+        <button
+          type="button"
+          onClick={() => goToView("checkout")}
+          disabled={orders.length === 0}
+          className="w-full rounded-2xl px-5 py-5 text-left text-white transition active:scale-[0.99] disabled:opacity-40 disabled:active:scale-100"
+          style={{ background: "var(--wm-ink)", boxShadow: "0 8px 22px rgba(45, 41, 38, 0.18)" }}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[10.5px] font-bold tracking-[.12em] opacity-60">NEXT STEP</div>
+              <div className="mt-1 text-[18px] font-bold leading-tight">お会計に進む</div>
+              <div className="mt-0.5 text-[11.5px] opacity-70">割り勘・支払い設定の画面</div>
+            </div>
+            <ArrowRight className="mt-1 h-5 w-5 shrink-0" />
+          </div>
+          <div className="mt-3 flex items-center gap-2 text-[11.5px] opacity-80">
+            <span className="wm-num font-semibold">¥{totals.totalAmount.toLocaleString()}</span>
+            <span>·</span>
+            <span>{orders.length}件の注文</span>
+            <span>·</span>
+            <span>{members.length}人で割り勘</span>
+          </div>
+          {orders.length === 0 && (
+            <div className="mt-2 text-[11px] opacity-70">注文を1件以上追加すると進めます</div>
+          )}
+        </button>
+        </>)}
+
+        {view === "checkout" && (<>
+        {/* お会計ビュー: 戻るボタン */}
+        <button
+          type="button"
+          onClick={() => goToView("orders")}
+          className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-[var(--wm-ink-2)] hover:text-foreground"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          注文一覧に戻る
+        </button>
+
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">割り勘</CardTitle>
@@ -2159,19 +2217,22 @@ export function TableDetailClient({
           orders={orders}
           adjustmentSummary={settlementAdjustmentSummary}
         />
+        </>)}
       </div>
 
-      {/* フローティング「+ 注文を追加」CTA */}
-      <button
-        type="button"
-        onClick={() => setAddOrderOpen(true)}
-        aria-label="注文を追加"
-        className="fixed right-4 bottom-[calc(env(safe-area-inset-bottom,0px)+84px)] z-50 inline-flex items-center gap-1.5 rounded-full bg-[var(--wm-accent)] px-5 py-3.5 text-[14px] font-semibold text-white transition hover:bg-[var(--wm-accent-pressed)] active:scale-95 md:bottom-6"
-        style={{ boxShadow: "0 8px 22px rgba(200, 85, 61, 0.32)" }}
-      >
-        <Plus className="h-4 w-4" />
-        注文を追加
-      </button>
+      {/* フローティング「+ 注文を追加」CTA (お会計ビューでは非表示) */}
+      {view === "orders" && (
+        <button
+          type="button"
+          onClick={() => setAddOrderOpen(true)}
+          aria-label="注文を追加"
+          className="fixed right-4 bottom-[calc(env(safe-area-inset-bottom,0px)+84px)] z-50 inline-flex items-center gap-1.5 rounded-full bg-[var(--wm-accent)] px-5 py-3.5 text-[14px] font-semibold text-white transition hover:bg-[var(--wm-accent-pressed)] active:scale-95 md:bottom-6"
+          style={{ boxShadow: "0 8px 22px rgba(200, 85, 61, 0.32)" }}
+        >
+          <Plus className="h-4 w-4" />
+          注文を追加
+        </button>
+      )}
 
       {/* 注文追加 Dialog */}
       <Dialog open={addOrderOpen} onOpenChange={setAddOrderOpen}>

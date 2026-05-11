@@ -20,17 +20,26 @@ interface TaxiCalculatorProps {
   currentUserId?: string
 }
 
+// 東京23区 (2022年11月改定) の普通車中型タクシーを基準にしたデフォルト値:
+//   - 初乗り 1.096km まで 500円
+//   - 加算 255m ごとに 100円 → 約 392 円/km
+//   - 迎車料金 420円 (大手各社の一般的な値)
+// 地域によって異なるため、詳細設定からユーザーが変更可能。
 const DEFAULT_TAXI_SETTINGS: FareSettings = {
-  baseKm: 1.2,
+  baseKm: 1.096,
   basePrice: 500,
-  perKmPrice: 100,
-  pickupFee: 0,
+  perKmPrice: 392,
+  pickupFee: 420,
 }
 
+// 運転代行は地域・会社差が大きいが、東京近郊の標準的なレンジ:
+//   - 初乗り 2km まで 2000円
+//   - 加算 300 円/km
+//   - 10km 超は +100 円/km の長距離割増を採用する会社が多い
 const DEFAULT_DAIKO_SETTINGS: FareSettings = {
   baseKm: 2,
-  basePrice: 1000,
-  perKmPrice: 200,
+  basePrice: 2000,
+  perKmPrice: 300,
   extraFromKm: 10,
   extraPerKm: 100,
   pickupFee: 0,

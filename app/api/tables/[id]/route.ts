@@ -5,6 +5,7 @@ import { users, tables } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { resolveUserIdFromGuestToken, isUserTableMember } from "@/lib/auth/permissions";
 import { generateInviteToken } from "@/lib/utils/invite-token";
+import { requireSameOrigin } from "@/lib/security/origin-check";
 
 async function resolveUserId(request: Request): Promise<string | null> {
   const session = await auth();
@@ -54,6 +55,9 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const originFail = requireSameOrigin(request);
+  if (originFail) return originFail;
+
   const userId = await resolveUserId(request);
 
   if (!userId) {
@@ -84,6 +88,9 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const originFail = requireSameOrigin(request);
+  if (originFail) return originFail;
+
   const userId = await resolveUserId(request);
 
   if (!userId) {

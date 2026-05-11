@@ -1,9 +1,16 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users, tables } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { resolveUserIdFromGuestToken } from "@/lib/auth/permissions";
+import { requireSameOrigin } from "@/lib/security/origin-check";
+
+const postSchema = z.object({
+  tableId: z.string().uuid(),
+  archive: z.boolean(),
+});
 
 async function resolveUserId(request: Request): Promise<string | null> {
   const session = await auth();
@@ -50,6 +57,9 @@ async function isTableOwner(userId: string, tableId: string): Promise<boolean> {
 }
 
 export async function POST(request: Request) {
+  const originFail = requireSameOrigin(request);
+  if (originFail) return originFail;
+
   const userId = await resolveUserId(request);
 
   if (!userId) {
@@ -57,12 +67,13 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json().catch(() => null);
-  const tableId = body?.tableId as string | undefined;
-  const archive = body?.archive as boolean | undefined;
+  const parsed = postSchema.safeParse(body);
 
-  if (!tableId || typeof archive !== "boolean") {
+  if (!parsed.success) {
     return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
   }
+
+  const { tableId, archive } = parsed.data;
 
   // Check ownership
   const isOwner = await isTableOwner(userId, tableId);

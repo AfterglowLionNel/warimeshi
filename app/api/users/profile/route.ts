@@ -4,12 +4,16 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { requireSameOrigin } from "@/lib/security/origin-check";
 
 const patchSchema = z.object({
   nickname: z.string().trim().max(50),
 });
 
 export async function PATCH(request: Request) {
+  const originFail = requireSameOrigin(request);
+  if (originFail) return originFail;
+
   const session = await auth();
 
   if (!session?.user?.id) {

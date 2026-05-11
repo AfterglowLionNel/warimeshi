@@ -5,6 +5,7 @@ import { users, tables, orders, tableMembers } from "@/lib/db/schema";
 import { eq, and, isNull, desc, inArray } from "drizzle-orm";
 import { resolveUserIdFromGuestToken } from "@/lib/auth/permissions";
 import { tableEvents } from "@/lib/events/table-events";
+import { requireSameOrigin } from "@/lib/security/origin-check";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 
@@ -73,6 +74,9 @@ async function isUserTableMemberDirect(userId: string, tableId: string): Promise
 }
 
 export async function POST(request: Request) {
+  const originFail = requireSameOrigin(request);
+  if (originFail) return originFail;
+
   const { userId } = await resolveUserId(request);
 
   if (!userId) {

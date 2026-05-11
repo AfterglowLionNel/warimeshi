@@ -5,6 +5,7 @@ import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import crypto from "crypto";
 import { clientKey, rateLimit, rateLimitHeaders } from "@/lib/security/rate-limit";
+import { requireSameOrigin } from "@/lib/security/origin-check";
 
 const GUEST_TOKEN_EXPIRY_DAYS = 30;
 const GUEST_COOKIE_NAME = "wm_guest_token";
@@ -14,6 +15,9 @@ const postSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const originFail = requireSameOrigin(request);
+  if (originFail) return originFail;
+
   // ゲスト作成は IP あたり 1 時間 5 回まで (大量生成 / DoS 防止)
   const limit = rateLimit(clientKey(request, "guest-create"), { windowSec: 3600, max: 5 });
   if (!limit.allowed) {

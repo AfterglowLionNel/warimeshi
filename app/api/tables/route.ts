@@ -6,6 +6,7 @@ import { eq, inArray, desc } from "drizzle-orm";
 import { generateInviteToken } from "@/lib/utils/invite-token";
 import { resolveUserIdFromGuestToken } from "@/lib/auth/permissions";
 import { encryptInvitePassword } from "@/lib/crypto/invite-password";
+import { requireSameOrigin } from "@/lib/security/origin-check";
 import { z } from "zod";
 
 const createTableSchema = z
@@ -90,6 +91,9 @@ function generateInvitePassword(length = 4): string {
 }
 
 export async function POST(request: Request) {
+  const originFail = requireSameOrigin(request);
+  if (originFail) return originFail;
+
   const { userId, isGuest } = await resolveUserId(request);
 
   if (!userId) {

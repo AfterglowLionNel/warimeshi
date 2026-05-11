@@ -5,6 +5,7 @@ import { users, orders, tableMembers, payments, tables } from "@/lib/db/schema"
 import { eq, and, isNull } from "drizzle-orm"
 import { resolveUserIdFromGuestToken } from "@/lib/auth/permissions"
 import { tableEvents } from "@/lib/events/table-events"
+import { requireSameOrigin } from "@/lib/security/origin-check"
 
 // Round up to nearest 10 yen
 const roundUp10 = (n: number) => Math.ceil(n / 10) * 10
@@ -158,6 +159,9 @@ async function resolveUserId(request: Request): Promise<string | null> {
 }
 
 export async function POST(request: Request) {
+  const originFail = requireSameOrigin(request)
+  if (originFail) return originFail
+
   const userId = await resolveUserId(request)
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })

@@ -1,31 +1,48 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users, taxiRecords } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 import { isUserTableMember } from "@/lib/auth/permissions";
-import type { CalculationMode, FareSettings, VehicleType } from "@/lib/types/taxi";
+import { requireSameOrigin } from "@/lib/security/origin-check";
 
-type TaxiRecordPayload = {
-  tableId: string;
-  vehicleType: VehicleType;
-  mode: CalculationMode;
-  settings: FareSettings;
-  input: Record<string, unknown>;
-  result: Record<string, unknown>;
-};
+const fareSettingsSchema = z.object({
+  baseKm: z.number().nonnegative(),
+  basePrice: z.number().nonnegative(),
+  perKmPrice: z.number().nonnegative(),
+  extraFromKm: z.number().nonnegative().optional(),
+  extraPerKm: z.number().nonnegative().optional(),
+  pickupFee: z.number().nonnegative(),
+});
+
+const postSchema = z.object({
+  tableId: z.string().uuid(),
+  vehicleType: z.enum(["taxi", "daiko"]),
+  mode: z.enum(["total", "same", "segments"]),
+  settings: fareSettingsSchema,
+  input: z.record(z.string(), z.unknown()),
+  result: z.record(z.string(), z.unknown()),
+});
 
 export async function POST(request: Request) {
+  const originFail = requireSameOrigin(request);
+  if (originFail) return originFail;
+
   const session = await auth();
 
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body = (await request.json().catch(() => null)) as TaxiRecordPayload | null;
-  if (!body?.tableId || !body.vehicleType || !body.mode) {
+  const body = await request.json().catch(() => null);
+  const parsed = postSchema.safeParse(body);
+
+  if (!parsed.success) {
     return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
   }
+
+  const data = parsed.data;
 
   let [dbUser] = await db
     .select({ id: users.id })
@@ -46,26 +63,26 @@ export async function POST(request: Request) {
   }
 
   // Check if user is member
-  const isMember = await isUserTableMember(session.user.id, body.tableId, session.user.email);
+  const isMember = await isUserTableMember(session.user.id, data.tableId, session.user.email);
   if (!isMember) {
     return NextResponse.json({ error: "このテーブルのメンバーではありません" }, { status: 403 });
   }
 
   try {
-    const [data] = await db
+    const [inserted] = await db
       .insert(taxiRecords)
       .values({
-        tableId: body.tableId,
+        tableId: data.tableId,
         createdByUserId: dbUser.id,
-        vehicleType: body.vehicleType,
-        mode: body.mode,
-        settings: body.settings,
-        input: body.input,
-        result: body.result,
+        vehicleType: data.vehicleType,
+        mode: data.mode,
+        settings: data.settings,
+        input: data.input,
+        result: data.result,
       })
       .returning();
 
-    return NextResponse.json({ success: true, data });
+    return NextResponse.json({ success: true, data: inserted });
   } catch (error) {
     console.error("Taxi record creation error:", error);
     return NextResponse.json({ error: "Failed to create taxi record" }, { status: 400 });

@@ -1,13 +1,23 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users, tables, tableMembers, orders } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { requireSameOrigin } from "@/lib/security/origin-check";
 
 const GUEST_COOKIE_NAME = "wm_guest_token";
 
+// guestToken は randomUUID 由来の UUID v4。形式を絞ることで雑な brute force を弾く。
+const postSchema = z.object({
+  guestToken: z.string().uuid(),
+});
+
 export async function POST(request: Request) {
+  const originFail = requireSameOrigin(request);
+  if (originFail) return originFail;
+
   const session = await auth();
 
   if (!session?.user?.id) {
@@ -15,11 +25,13 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json().catch(() => null);
-  const guestToken = body?.guestToken as string | undefined;
+  const parsed = postSchema.safeParse(body);
 
-  if (!guestToken) {
-    return NextResponse.json({ error: "guestToken is required" }, { status: 400 });
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
   }
+
+  const guestToken = parsed.data.guestToken;
 
   // 所有権検証: HttpOnly Cookie に保存された guestToken と body の guestToken が一致することを要求。
   // これにより、他人の guestToken を入手しただけでは link-guest 経由でデータを乗っ取れない。

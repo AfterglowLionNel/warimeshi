@@ -5,6 +5,7 @@ import { users, orders, tables, tableMembers } from "@/lib/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { resolveUserIdFromGuestToken } from "@/lib/auth/permissions";
 import { tableEvents } from "@/lib/events/table-events";
+import { requireSameOrigin } from "@/lib/security/origin-check";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -48,6 +49,9 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const originFail = requireSameOrigin(request);
+  if (originFail) return originFail;
+
   const userId = await resolveUserId(request);
 
   if (!userId) {
@@ -166,6 +170,9 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const originFail = requireSameOrigin(request);
+  if (originFail) return originFail;
+
   const userId = await resolveUserId(request);
 
   if (!userId) {

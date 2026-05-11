@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server"
+import { z } from "zod"
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
 import { users, payments, tableMembers } from "@/lib/db/schema"
 import { eq, and } from "drizzle-orm"
 import { resolveUserIdFromGuestToken } from "@/lib/auth/permissions"
 import { tableEvents } from "@/lib/events/table-events"
+import { requireSameOrigin } from "@/lib/security/origin-check"
+
+const patchSchema = z.object({
+  isPaid: z.boolean(),
+})
 
 async function resolveUserId(request: Request): Promise<string | null> {
   const session = await auth()
@@ -30,6 +36,9 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const originFail = requireSameOrigin(request)
+  if (originFail) return originFail
+
   const userId = await resolveUserId(request)
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -37,11 +46,13 @@ export async function PATCH(
 
   const { id: paymentId } = await params
   const body = await request.json().catch(() => null)
-  const isPaid = body?.isPaid as boolean | undefined
+  const parsed = patchSchema.safeParse(body)
 
-  if (typeof isPaid !== "boolean") {
-    return NextResponse.json({ error: "isPaid is required" }, { status: 400 })
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid payload" }, { status: 400 })
   }
+
+  const { isPaid } = parsed.data
 
   // Get payment
   const [payment] = await db

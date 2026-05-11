@@ -8,6 +8,7 @@ import { tableEvents } from "@/lib/events/table-events";
 import bcrypt from "bcryptjs";
 import { decryptInvitePassword, isEncryptedInvitePassword } from "@/lib/crypto/invite-password";
 import { clientKey, rateLimit, rateLimitHeaders } from "@/lib/security/rate-limit";
+import { requireSameOrigin } from "@/lib/security/origin-check";
 import { z } from "zod";
 
 const joinMemberSchema = z
@@ -64,6 +65,9 @@ async function isUserTableMemberWithGuest(userId: string, tableId: string, _isGu
 }
 
 export async function POST(request: Request) {
+  const originFail = requireSameOrigin(request);
+  if (originFail) return originFail;
+
   const { userId, isGuest: isGuestUser } = await resolveUserId(request);
 
   if (!userId) {
@@ -265,6 +269,9 @@ export async function GET(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const originFail = requireSameOrigin(request);
+  if (originFail) return originFail;
+
   const { userId } = await resolveUserId(request);
 
   if (!userId) {

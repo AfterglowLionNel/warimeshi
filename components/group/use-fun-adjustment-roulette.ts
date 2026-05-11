@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import type { TableMember } from "@/lib/types/group"
 
 export type RouletteAdjustmentType = "remainder_roulette" | "lucky_discount" | "full_burden_roulette"
 
@@ -9,6 +8,13 @@ export type RouletteResult = {
   type: RouletteAdjustmentType
   targetMemberId: string
   amount?: number
+}
+
+// このフックが必要とする最小限のメンバー情報。
+// グループモードの TableMember と /calc の Person 両方を受け付ける。
+export type RouletteMemberLike = {
+  id: string
+  display_name: string
 }
 
 const ROULETTE_ITEM_WIDTH = 128
@@ -34,12 +40,12 @@ function getRouletteTravel(progress: number, totalDistance: number) {
   return creepStartDistance + (totalDistance - creepStartDistance) * (1 - Math.pow(1 - p, 3.9))
 }
 
-export function useFunAdjustmentRoulette({
+export function useFunAdjustmentRoulette<M extends RouletteMemberLike>({
   members,
   exemptMemberId,
   onResult,
 }: {
-  members: TableMember[]
+  members: M[]
   exemptMemberId: string | null
   onResult: (result: RouletteResult) => void
 }) {

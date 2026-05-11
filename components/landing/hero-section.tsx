@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { ArrowRight, Check, Car } from "lucide-react"
+import { ArrowRight, Check, Car, Calculator } from "lucide-react"
 import { PreviewCard } from "@/components/landing/preview-card"
 
 export function HeroSection() {
@@ -41,18 +41,32 @@ export function HeroSection() {
                 <Link href="/solo">ソロで試す</Link>
               </Button>
             </div>
-            <Button
-              asChild
-              variant="outline"
-              size="lg"
-              className="w-full bg-transparent border-[var(--wm-accent)]/30 text-[var(--wm-accent-pressed)] hover:bg-[var(--wm-accent-soft)] hover:text-[var(--wm-accent-pressed)]"
-            >
-              <Link href="/taxi">
-                <Car className="mr-1 h-4 w-4" />
-                タクシー割り勘で計算する
-                <ArrowRight className="ml-1 h-4 w-4" />
-              </Link>
-            </Button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <Button
+                asChild
+                variant="outline"
+                size="lg"
+                className="w-full bg-transparent border-[var(--wm-accent)]/30 text-[var(--wm-accent-pressed)] hover:bg-[var(--wm-accent-soft)] hover:text-[var(--wm-accent-pressed)]"
+              >
+                <Link href="/calc">
+                  <Calculator className="mr-1 h-4 w-4" />
+                  かんたん計算
+                  <ArrowRight className="ml-1 h-4 w-4" />
+                </Link>
+              </Button>
+              <Button
+                asChild
+                variant="outline"
+                size="lg"
+                className="w-full bg-transparent border-[var(--wm-accent)]/30 text-[var(--wm-accent-pressed)] hover:bg-[var(--wm-accent-soft)] hover:text-[var(--wm-accent-pressed)]"
+              >
+                <Link href="/taxi">
+                  <Car className="mr-1 h-4 w-4" />
+                  タクシー割り勘
+                  <ArrowRight className="ml-1 h-4 w-4" />
+                </Link>
+              </Button>
+            </div>
           </div>
 
           {/* checks */}

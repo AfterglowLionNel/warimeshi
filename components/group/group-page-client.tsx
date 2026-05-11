@@ -42,7 +42,6 @@ import {
   Plus,
   UserPlus,
   Users,
-  Calendar,
   Crown,
   MoreVertical,
   Archive,
@@ -287,12 +286,24 @@ export function GroupPageClient({ serverUser, serverTables }: GroupPageClientPro
 
         {/* Tables */}
         <Tabs defaultValue="active">
-          <TabsList className="w-full">
-            <TabsTrigger value="active" className="flex-1">
-              参加中 ({activeTables.length})
+          <TabsList className="w-full h-11 p-1 bg-[var(--wm-surface)]">
+            <TabsTrigger
+              value="active"
+              className="flex-1 h-9 gap-1.5 text-[13px] font-semibold data-[state=active]:bg-card data-[state=active]:shadow-sm"
+            >
+              参加中
+              <span className="inline-flex items-center justify-center min-w-[20px] h-[18px] px-1 rounded-full bg-[var(--wm-accent)] text-white text-[10px] font-bold wm-num">
+                {activeTables.length}
+              </span>
             </TabsTrigger>
-            <TabsTrigger value="archived" className="flex-1">
-              アーカイブ ({archivedTables.length})
+            <TabsTrigger
+              value="archived"
+              className="flex-1 h-9 gap-1.5 text-[13px] font-semibold data-[state=active]:bg-card data-[state=active]:shadow-sm"
+            >
+              アーカイブ
+              <span className="inline-flex items-center justify-center min-w-[20px] h-[18px] px-1 rounded-full bg-[var(--wm-ink-4)] text-white text-[10px] font-bold wm-num">
+                {archivedTables.length}
+              </span>
             </TabsTrigger>
           </TabsList>
 
@@ -663,6 +674,21 @@ function JoinTableButton() {
   );
 }
 
+const WEEKDAY_JP = ["日", "月", "火", "水", "木", "金", "土"] as const;
+
+function formatRelativeDate(date: Date): { label: string; tone: "today" | "near" | "past" | "future" } {
+  const now = new Date();
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diffDays = Math.round((startOfDay(date) - startOfDay(now)) / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return { label: "今日", tone: "today" };
+  if (diffDays === -1) return { label: "昨日", tone: "near" };
+  if (diffDays === 1) return { label: "明日", tone: "near" };
+  if (diffDays > 1 && diffDays <= 7) return { label: `${diffDays}日後`, tone: "future" };
+  if (diffDays < -1 && diffDays >= -7) return { label: `${-diffDays}日前`, tone: "near" };
+  if (diffDays > 7) return { label: `${diffDays}日後`, tone: "future" };
+  return { label: `${-diffDays}日前`, tone: "past" };
+}
+
 function TableCard({
   table,
   onArchive,
@@ -672,88 +698,138 @@ function TableCard({
   onArchive: (id: string, archive: boolean) => void;
   onDelete: (id: string) => void;
 }) {
+  const eventDate = new Date(table.event_date);
+  const relative = formatRelativeDate(eventDate);
+  const month = eventDate.getMonth() + 1;
+  const day = eventDate.getDate();
+  const weekday = WEEKDAY_JP[eventDate.getDay()];
+
+  const dateBlockStyle =
+    relative.tone === "today"
+      ? "bg-[var(--wm-accent)] text-white"
+      : relative.tone === "near" || relative.tone === "future"
+      ? "bg-[var(--wm-accent-soft)] text-[var(--wm-accent-pressed)]"
+      : "bg-[var(--wm-surface)] text-[var(--wm-ink-2)]";
+
   return (
-    <Card className="hover:border-primary/50 transition-colors">
-      <CardContent className="p-4">
-        <div className="flex items-center gap-3">
-          <Link href={`/group/table/${table.invite_token}`} className="flex-1 min-w-0">
-            <div className="flex items-start justify-between">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-medium truncate">{table.name}</h3>
-                  {table.is_master && (
-                    <Badge variant="secondary" className="flex items-center gap-1">
-                      <Crown className="h-3 w-3" />
-                      マスター
-                    </Badge>
-                  )}
-                </div>
-                <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <Calendar className="h-3 w-3" />
-                    {new Date(table.event_date).toLocaleDateString("ja-JP")}
+    <Card className="overflow-hidden border-[var(--wm-line)] transition-all hover:border-[var(--wm-accent)]/40 hover:shadow-md active:scale-[0.997]">
+      <CardContent className="p-0">
+        <div className="flex items-stretch">
+          <Link
+            href={`/group/table/${table.invite_token}`}
+            className="flex flex-1 items-stretch gap-3 min-w-0 group"
+          >
+            {/* 日付ブロック */}
+            <div
+              className={`flex flex-col items-center justify-center w-[68px] shrink-0 py-3 ${dateBlockStyle}`}
+            >
+              <div className="text-[10px] font-semibold leading-none opacity-80">{month}月</div>
+              <div className="wm-num mt-0.5 text-[26px] font-bold leading-none tabular-nums">{day}</div>
+              <div className="text-[10px] font-semibold leading-none mt-1 opacity-80">({weekday})</div>
+            </div>
+
+            {/* メイン情報 */}
+            <div className="flex-1 min-w-0 py-3 pr-2 flex flex-col justify-center">
+              <div className="flex items-center gap-1.5 min-w-0">
+                {table.is_master && (
+                  <span
+                    className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md"
+                    style={{ background: "var(--wm-accent-soft)", color: "var(--wm-accent-pressed)" }}
+                    aria-label="主催者"
+                  >
+                    <Crown className="h-3 w-3" />
                   </span>
-                  <span className="flex items-center gap-1">
-                    <Users className="h-3 w-3" />
-                    {table.member_count}人
-                  </span>
-                </div>
+                )}
+                <h3 className="text-[15px] font-bold leading-tight text-foreground truncate">
+                  {table.name}
+                </h3>
               </div>
-              <ChevronRight className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+              <div className="mt-1.5 flex items-center gap-2 text-[11.5px] text-[var(--wm-ink-3)]">
+                <span
+                  className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold ${
+                    relative.tone === "today"
+                      ? "bg-[var(--wm-accent-soft)] text-[var(--wm-accent-pressed)]"
+                      : "bg-[var(--wm-surface)] text-[var(--wm-ink-2)]"
+                  }`}
+                >
+                  {relative.label}
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <Users className="h-3 w-3" />
+                  <span className="wm-num font-semibold text-[var(--wm-ink-2)]">{table.member_count}</span>
+                  <span>人</span>
+                </span>
+                {table.is_master && (
+                  <span className="text-[10px] font-bold tracking-wider text-[var(--wm-accent-pressed)]">
+                    主催
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center pr-2 transition-transform group-hover:translate-x-0.5">
+              <ChevronRight className="h-5 w-5 text-[var(--wm-ink-3)]" />
             </div>
           </Link>
 
           {table.is_master && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
-                  <MoreVertical className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {table.is_archived ? (
-                  <DropdownMenuItem onClick={() => onArchive(table.id, false)}>
-                    <ArchiveRestore className="h-4 w-4 mr-2" />
-                    アーカイブ解除
-                  </DropdownMenuItem>
-                ) : (
-                  <DropdownMenuItem onClick={() => onArchive(table.id, true)}>
-                    <Archive className="h-4 w-4 mr-2" />
-                    アーカイブ
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuSeparator />
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <DropdownMenuItem
-                      className="text-destructive focus:text-destructive"
-                      onSelect={(e) => e.preventDefault()}
-                    >
-                      <Trash2 className="h-4 w-4 mr-2" />
-                      削除
+            <div className="flex items-center pr-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 flex-shrink-0 text-[var(--wm-ink-3)] hover:bg-[var(--wm-surface)]"
+                    aria-label="メニュー"
+                  >
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {table.is_archived ? (
+                    <DropdownMenuItem onClick={() => onArchive(table.id, false)}>
+                      <ArchiveRestore className="h-4 w-4 mr-2" />
+                      アーカイブ解除
                     </DropdownMenuItem>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>テーブルを削除しますか？</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        「{table.name}」と関連する全てのデータ（注文履歴、メンバー情報など）が完全に削除されます。
-                        この操作は取り消せません。
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>キャンセル</AlertDialogCancel>
-                      <AlertDialogAction
-                        onClick={() => onDelete(table.id)}
-                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  ) : (
+                    <DropdownMenuItem onClick={() => onArchive(table.id, true)}>
+                      <Archive className="h-4 w-4 mr-2" />
+                      アーカイブ
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <DropdownMenuItem
+                        className="text-destructive focus:text-destructive"
+                        onSelect={(e) => e.preventDefault()}
                       >
-                        削除する
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        削除
+                      </DropdownMenuItem>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>テーブルを削除しますか？</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          「{table.name}」と関連する全てのデータ（注文履歴、メンバー情報など）が完全に削除されます。
+                          この操作は取り消せません。
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>キャンセル</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={() => onDelete(table.id)}
+                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        >
+                          削除する
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           )}
         </div>
       </CardContent>

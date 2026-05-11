@@ -2151,7 +2151,7 @@ export function TableDetailClient({
                             }}
                           />
                         </div>
-                        <div className="pointer-events-none absolute inset-y-3 left-1/2 z-20 w-[3px] -translate-x-1/2 rounded-full bg-[#F2C14E]" />
+                        <div className="pointer-events-none absolute inset-y-3 left-1/2 z-20 w-[2px] -translate-x-1/2 rounded-full bg-[#F2C14E]" />
                         <div
                           className="flex will-change-transform"
                           style={{ transform: `translateX(calc(50% - ${rouletteOffset}px))` }}

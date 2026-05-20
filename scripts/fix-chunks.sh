@@ -5,7 +5,11 @@
 
 set -e
 
-NEXT_DIR="/path/to/app/.next"
+# プロジェクトルート (このスクリプトの親ディレクトリ) からの相対パスで解決する
+# 必要なら NEXT_DIR を環境変数で上書き可能
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+NEXT_DIR="${NEXT_DIR:-$PROJECT_ROOT/.next}"
 CHUNKS_DIR="$NEXT_DIR/static/chunks"
 
 # Fix empty prerender-manifest.json (another Turbopack bug)

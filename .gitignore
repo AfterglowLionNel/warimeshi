@@ -12,7 +12,11 @@ coverage/
 .DS_Store
 .vscode/
 .idea/
+
+# PM2 / deployment local config (運用パス・ポート等を含むため git に乗せない)
+ecosystem.config.js
 ecosystem.local.config.js
+*.service
 
 tsconfig.tsbuildinfo
 package-lock.json

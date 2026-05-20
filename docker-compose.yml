@@ -13,7 +13,8 @@ services:
     restart: unless-stopped
     ports:
       # ホスト側 5433 → コンテナ 5432 (ホスト側 5432 は Windows ネイティブ postgres と衝突するため)
-      - "5433:5432"
+      # 127.0.0.1 にバインドし、ホストの外部 IF に待ち受けさせない (VPS 上での誤起動防止)
+      - "127.0.0.1:5433:5432"
     environment:
       POSTGRES_USER: warimeshi
       POSTGRES_PASSWORD: warimeshi

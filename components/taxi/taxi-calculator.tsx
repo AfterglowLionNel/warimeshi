@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import type { CalculationMode, FareSettings, Modifier, Segment, VehicleType } from "@/lib/types/taxi"
+import type { CalculationMode, FareSettings, Modifier, Segment, SegmentInputMode, VehicleType } from "@/lib/types/taxi"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -187,6 +187,11 @@ export function TaxiCalculator({
   const [segments, setSegments] = useState<Segment[]>([{ id: "1", name: "", distanceKm: 0, dropCount: 1 }])
   const [startName, setStartName] = useState("")
   const [showSegmentHint, setShowSegmentHint] = useState(true)
+  // 区間別の入力方式: 主はメーター金額入力 (fare)、副は料金設定計算 (distance)
+  const [segmentInputMode, setSegmentInputMode] = useState<SegmentInputMode>("fare")
+  const [segmentMeterFare, setSegmentMeterFare] = useState("")
+  // 「高速料金など、全員で均等に頭割りしたい固定額」(任意)
+  const [segmentEqualSurcharge, setSegmentEqualSurcharge] = useState("")
   const [, setIsSaving] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [showLongDistanceSettings, setShowLongDistanceSettings] = useState(false)
@@ -219,6 +224,11 @@ export function TaxiCalculator({
       if (Array.isArray(input.modifiers)) {
         setModifiers(input.modifiers as Modifier[])
       }
+      // 区間別の入力方式 (後方互換: 旧データは distance 扱い、ただし新規/未指定は fare)
+      const savedSegMode = input.segmentInputMode as SegmentInputMode | undefined
+      setSegmentInputMode(savedSegMode === "distance" ? "distance" : "fare")
+      setSegmentMeterFare((input.segmentMeterFare as string) ?? "")
+      setSegmentEqualSurcharge((input.segmentEqualSurcharge as string) ?? "")
     }
     if (data.created_at) {
       lastRemoteCreatedAt.current = data.created_at as string
@@ -310,7 +320,9 @@ export function TaxiCalculator({
   const hasLongDistance = (settings.extraFromKm !== undefined && !Number.isNaN(settings.extraFromKm) && settings.extraFromKm > 0) ||
     (settings.extraPerKm !== undefined && !Number.isNaN(settings.extraPerKm) && settings.extraPerKm > 0)
 
-  const settingsInvalid = mode === "total"
+  // 料金設定が必要なモード: 距離(same) と 区間別かつ料金設定計算
+  const requiresFareSettings = mode === "same" || (mode === "segments" && segmentInputMode === "distance")
+  const settingsInvalid = !requiresFareSettings
     ? false
     : (
       // 基本パラメータ: baseKm > 0, その他 >= 0
@@ -400,10 +412,25 @@ export function TaxiCalculator({
     const totalPassengers = validSegments.reduce((sum, s) => sum + (s.dropCount || 1), 0)
     if (totalPassengers <= 0) return null
 
-    const baseFare = calculateBaseFare(totalDistance)
-    const totalFare = applyModifiers(baseFare)
-
-    const pickupPortion = Math.min(pickupFee, totalFare)
+    let totalFare: number
+    let pickupPortion: number
+    if (segmentInputMode === "fare") {
+      // メーター金額モード: 入力された総額を距離比で按分する
+      // - meterFare: メーター総額 (必須)
+      // - equalSurcharge: 高速料金など全員で頭割りしたい固定額 (任意)
+      const meter = Number.parseInt(segmentMeterFare, 10)
+      if (!Number.isFinite(meter) || meter <= 0) return null
+      const surchargeRaw = Number.parseInt(segmentEqualSurcharge, 10)
+      const surcharge = Number.isFinite(surchargeRaw) && surchargeRaw > 0 ? surchargeRaw : 0
+      totalFare = meter + surcharge
+      // 距離按分対象外として「均等加算分」を pickupPortion 相当に
+      pickupPortion = Math.min(surcharge, totalFare)
+    } else {
+      // 料金設定計算モード (旧来)
+      const baseFare = calculateBaseFare(totalDistance)
+      totalFare = applyModifiers(baseFare)
+      pickupPortion = Math.min(pickupFee, totalFare)
+    }
     const distancePortion = totalFare - pickupPortion
     const pricePerKm = totalDistance > 0 ? distancePortion / totalDistance : 0
 
@@ -468,7 +495,7 @@ export function TaxiCalculator({
     const pickupPerPerson = Math.round(pickupPerPersonRaw)
 
     return { mode: "segments" as const, totalDistance, totalFare, pricePerKm, pickupPerPerson, totalPassengers, segments: segmentResults, passengers }
-  }, [mode, totalAmount, totalPersonCount, sameDistance, samePersonCount, segments, settings, effectiveModifiers, settingsInvalid])
+  }, [mode, totalAmount, totalPersonCount, sameDistance, samePersonCount, segments, settings, effectiveModifiers, settingsInvalid, segmentInputMode, segmentMeterFare, segmentEqualSurcharge])
 
   // Auto-save to DB when results change
   useEffect(() => {
@@ -478,7 +505,7 @@ export function TaxiCalculator({
       vehicleType,
       mode,
       settings,
-      input: { totalAmount, totalPersonCount, sameDistance, samePersonCount, segments, mode, vehicleType, nightSurcharge, modifiers },
+      input: { totalAmount, totalPersonCount, sameDistance, samePersonCount, segments, mode, vehicleType, nightSurcharge, modifiers, segmentInputMode, segmentMeterFare, segmentEqualSurcharge },
       result: results,
     })
     if (payloadHash === lastSavedHash.current) return
@@ -493,7 +520,7 @@ export function TaxiCalculator({
           vehicleType,
           mode,
           settings,
-          input: { totalAmount, totalPersonCount, sameDistance, samePersonCount, segments, mode, vehicleType, nightSurcharge, modifiers },
+          input: { totalAmount, totalPersonCount, sameDistance, samePersonCount, segments, mode, vehicleType, nightSurcharge, modifiers, segmentInputMode, segmentMeterFare, segmentEqualSurcharge },
           result: results,
         }),
       })
@@ -513,9 +540,7 @@ export function TaxiCalculator({
     }
 
     void save()
-  }, [results, tableId, currentUserId, vehicleType, mode, settings, totalAmount, totalPersonCount, sameDistance, samePersonCount, segments, nightSurcharge, modifiers])
-
-  const isDistanceMode = mode === "same" || mode === "segments"
+  }, [results, tableId, currentUserId, vehicleType, mode, settings, totalAmount, totalPersonCount, sameDistance, samePersonCount, segments, nightSurcharge, modifiers, segmentInputMode, segmentMeterFare, segmentEqualSurcharge])
 
   return (
     <div className="space-y-3">
@@ -561,7 +586,7 @@ export function TaxiCalculator({
       </div>
       {mode !== "segments" && (
         <p className="-mt-1 px-1 text-[11px] leading-relaxed text-[var(--wm-ink-3)]">
-          途中で降りる人がいる飲み会帰りなら <strong className="text-[var(--wm-accent-pressed)]">区間別</strong> が公平でおすすめです。
+          途中で降りる人がいる飲み会帰りなら <strong className="text-[var(--wm-accent-pressed)]">区間別</strong> が公平でおすすめ。メーター金額をそのまま入れて距離で按分できます。
         </p>
       )}
 
@@ -614,6 +639,26 @@ export function TaxiCalculator({
 
       {mode === "segments" && (
         <div className="wm-card p-4 space-y-3">
+          {/* 入力方式の小タブ: メーター金額按分 (主) / 料金設定計算 (副) */}
+          <div className="wm-tabs">
+            <button
+              type="button"
+              className={`wm-tab ${segmentInputMode === "fare" ? "is-active" : ""}`}
+              onClick={() => setSegmentInputMode("fare")}
+              aria-pressed={segmentInputMode === "fare"}
+            >
+              メーター金額から
+            </button>
+            <button
+              type="button"
+              className={`wm-tab ${segmentInputMode === "distance" ? "is-active" : ""}`}
+              onClick={() => setSegmentInputMode("distance")}
+              aria-pressed={segmentInputMode === "distance"}
+            >
+              料金設定から
+            </button>
+          </div>
+
           {/* 使い方ヒント */}
           {showSegmentHint && (
             <div className="rounded-[12px] bg-[var(--wm-accent-soft)] p-3 text-[12px] leading-relaxed text-[var(--wm-accent-pressed)]">
@@ -621,13 +666,27 @@ export function TaxiCalculator({
                 <Info className="mt-0.5 h-4 w-4 shrink-0" />
                 <div className="flex-1 space-y-1.5">
                   <div className="font-semibold">使い方</div>
-                  <div>
-                    出発地点を入力して、降りる順に「次の停留所」と「そこまでの距離」を追加します。
-                    距離料金はその区間に乗っている人数で割られます。
-                  </div>
-                  <div className="mt-1.5 rounded-[8px] bg-white/60 p-2 text-[11px] text-[var(--wm-ink-2)]">
-                    例: 居酒屋 → <span className="font-semibold">たかしの家 (2km)</span> → <span className="font-semibold">ゆうきのアパート (3km)</span>
-                  </div>
+                  {segmentInputMode === "fare" ? (
+                    <>
+                      <div>
+                        降りる時にメーターに出た合計金額と、各区間のだいたいの距離を入れてください。
+                        距離比 × 区間ごとの乗車人数で1人あたりを自動で按分します。料金設定の入力は不要です。
+                      </div>
+                      <div className="mt-1.5 rounded-[8px] bg-white/60 p-2 text-[11px] text-[var(--wm-ink-2)]">
+                        例: メーター ¥3,200 / 居酒屋 → <span className="font-semibold">たかしの家 (2km)</span> → <span className="font-semibold">ゆうきのアパート (3km)</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        出発地点を入力して、降りる順に「次の停留所」と「そこまでの距離」を追加します。
+                        距離と料金設定 (初乗り・加算単価) から運賃を推定して按分します。
+                      </div>
+                      <div className="mt-1.5 rounded-[8px] bg-white/60 p-2 text-[11px] text-[var(--wm-ink-2)]">
+                        例: 居酒屋 → <span className="font-semibold">たかしの家 (2km)</span> → <span className="font-semibold">ゆうきのアパート (3km)</span>
+                      </div>
+                    </>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -637,6 +696,47 @@ export function TaxiCalculator({
                 >
                   <Minus className="h-4 w-4" />
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* 金額モード: メーター金額 + 全員均等加算 */}
+          {segmentInputMode === "fare" && (
+            <div className="space-y-2.5 rounded-[14px] border border-[var(--wm-line)] bg-card p-3">
+              <div>
+                <Label className="text-[12px] font-semibold text-[var(--wm-ink-2)]">メーター金額</Label>
+                <div className="relative mt-1.5">
+                  <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[22px] font-semibold text-[var(--wm-ink-3)]">¥</span>
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    min="0"
+                    placeholder="3200"
+                    className="wm-num h-14 pl-10 pr-4 text-right text-[26px] font-bold placeholder:text-[var(--wm-ink-4)] placeholder:font-normal"
+                    value={segmentMeterFare}
+                    onChange={(e) => setSegmentMeterFare(e.target.value.replace(/[^\d]/g, ""))}
+                  />
+                </div>
+              </div>
+              <div>
+                <Label className="text-[11px] font-semibold text-[var(--wm-ink-3)]">
+                  全員で均等に頭割りする固定額 <span className="font-normal">(任意・高速料金など)</span>
+                </Label>
+                <div className="relative mt-1.5">
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[14px] font-semibold text-[var(--wm-ink-3)]">¥</span>
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    min="0"
+                    placeholder="0"
+                    className="wm-num h-10 pl-8 pr-3 text-right text-[14px] font-semibold placeholder:text-[var(--wm-ink-4)] placeholder:font-normal"
+                    value={segmentEqualSurcharge}
+                    onChange={(e) => setSegmentEqualSurcharge(e.target.value.replace(/[^\d]/g, ""))}
+                  />
+                </div>
+                <p className="mt-1 text-[10.5px] text-[var(--wm-ink-3)]">
+                  入れた額はメーター金額に加算され、距離按分とは別に乗車人数で頭割りされます。
+                </p>
               </div>
             </div>
           )}
@@ -936,8 +1036,8 @@ export function TaxiCalculator({
         </>
       )}
 
-      {/* クイックオプション (距離モードのみ) */}
-      {isDistanceMode && (
+      {/* クイックオプション: 料金設定で計算するモード (距離 / 区間別×料金設定) のみ */}
+      {requiresFareSettings && (
         <div className="wm-card p-3">
           <button
             type="button"
@@ -980,8 +1080,8 @@ export function TaxiCalculator({
             <span className="flex items-center gap-2 text-[13.5px] font-semibold text-[var(--wm-ink-2)]">
               <Settings2 className="h-4 w-4" />
               詳細設定
-              {mode === "total" && (
-                <span className="ml-1 text-[11px] font-normal text-[var(--wm-ink-3)]">(金額モードでは未使用)</span>
+              {!requiresFareSettings && (
+                <span className="ml-1 text-[11px] font-normal text-[var(--wm-ink-3)]">(金額入力では未使用)</span>
               )}
             </span>
             <ChevronDown className={`h-4 w-4 text-[var(--wm-ink-3)] transition-transform ${showAdvanced ? "rotate-180" : ""}`} />
@@ -989,7 +1089,7 @@ export function TaxiCalculator({
         </CollapsibleTrigger>
         <CollapsibleContent className="space-y-3 pt-3">
           {/* 車種切替 */}
-          {isDistanceMode && (
+          {requiresFareSettings && (
             <div className="wm-tabs">
               <button
                 type="button"
@@ -1011,7 +1111,7 @@ export function TaxiCalculator({
           )}
 
           {/* 料金設定 */}
-          {isDistanceMode && (
+          {requiresFareSettings && (
             <div className="wm-card p-4 space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="wm-h3 text-[14px] font-semibold">料金設定</h3>
@@ -1166,7 +1266,7 @@ export function TaxiCalculator({
           )}
 
           {/* カスタム割増・割引 */}
-          {isDistanceMode && (
+          {requiresFareSettings && (
             <div className="wm-card p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="wm-h3 text-[14px] font-semibold">カスタム割増・割引</h3>
@@ -1288,9 +1388,11 @@ export function TaxiCalculator({
             </div>
           )}
 
-          {mode === "total" && (
+          {!requiresFareSettings && (
             <div className="wm-card p-4 text-[12px] text-[var(--wm-ink-2)]">
-              金額モードはメーター金額を直接入力するため、車種・料金設定・割増は使用されません。距離から運賃を推定したい場合は「距離」または「区間別」モードを選んでください。
+              {mode === "total"
+                ? "金額モードはメーター金額を直接入力するため、車種・料金設定・割増は使用されません。距離から運賃を推定したい場合は「距離」または「区間別」モードを選んでください。"
+                : "区間別の「メーター金額から」は入力した総額をそのまま距離比で按分します。料金設定や割増を使って距離から計算したい場合は、上の小タブで「料金設定から」を選んでください。"}
             </div>
           )}
         </CollapsibleContent>

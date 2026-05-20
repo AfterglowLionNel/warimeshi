@@ -26,3 +26,8 @@ export interface Segment {
 }
 
 export type CalculationMode = "total" | "same" | "segments"
+
+// 区間別モード内での入力方式
+// - fare: メーター総額を直接入力 → 距離比で按分
+// - distance: 距離 + 料金設定から計算 (旧来の方式)
+export type SegmentInputMode = "fare" | "distance"
